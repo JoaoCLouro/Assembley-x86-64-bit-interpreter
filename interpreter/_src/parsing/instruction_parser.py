@@ -336,6 +336,7 @@ class Instruction_Parser:
         Tries to match size key words and skips over the expected operand, if it finds one else raises an exception. Also tries to match unspecified sized operands and tries to get their size (if register).
         If doesn't match either a size keyword or an operand format raises a SyntaxError.\n
         Returns pairs of sizes and operand expressions used in the declaration as list elements (always 4 elements but the sizes could be '""')
+        
         :param line: Line of code in which the operands are declared without the instruction previously removed
         :type line: list[str]
         :return: List os size and operand expression pairs always following the format: [size;op2;size;op1]
@@ -667,26 +668,49 @@ class Instruction_Parser:
         """
         Attributes the size and expression value of each operand to the respective instances of this class.\n
         If comes across a non declared size and there are no registers in the instruction raises SyntaxError. If any of the expressions for the operands are not set raises ValueError
-        
+
         :param op_info: List with the size and expression of each operand as a pair in the format: [size;op2;size;op1]
         :type op_info: list[str]
         :raises SyntaxError: If comes across undeclared sizes with out registers in the instruction.
         :raises ValueError: If any of the operand expressions are not set.
         """
-        # Fail safe verification
-        if op_info[3] == "" or op_info[1] == "":
+        has_op2 = op_info[1] != ""
+
+        # Fail safe verification: op1 must always be set. op2's expression is only required if op2 exists.
+        if op_info[3] == "":
             raise ValueError("Program parsing ran into a problem! Aborting execution ...")
-        # If any operand doesn't have size and there is no registers in the instruction the syntax is invalid
-        elif (op_info[0] == "" or op_info[2] == "") and not (self.is_register(op_info[1]) or self.is_register(op_info[3])):
-            raise SyntaxError(f"INVALID SYNTAX FORMAT AT LINE {self.rip}!")
-        else:
-            # If a register exists and one of the sizes for the operands is a null identifier, give it the size of the register used
-            if op_info[0] == "" or op_info[2] == "":
-                if self.is_register(op_info[1]):
-                    op_info[2] = op_info[0]
-                else:
-                    op_info[0] = op_info[2]
-            self.set_operand("op1", op_info[3], int(op_info[2]))
+
+        # Resolve op1's size if missing
+        if op_info[2] == "":
+            if self.is_register(op_info[3]):
+                try:
+                    op_info[2] = str(self.get_register_size(op_info[3]))
+                except SyntaxError as e:
+                    print(e)
+                    sys.exit(ExitCode.INVALID_INSTRUCTION_SYNTAX)
+            elif has_op2 and op_info[0] != "":
+                # No size and not a register: infer from op2's size if available
+                op_info[2] = op_info[0]
+            else:
+                raise SyntaxError(f"INVALID SYNTAX FORMAT AT LINE {self.rip}!")
+
+        # Resolve op2's size if missing (only relevant if op2 exists)
+        if has_op2 and op_info[0] == "":
+            if self.is_register(op_info[1]):
+                try:
+                    op_info[0] = str(self.get_register_size(op_info[1]))
+                except SyntaxError as e:
+                    print(e)
+                    sys.exit(ExitCode.INVALID_INSTRUCTION_SYNTAX)
+            elif op_info[2] != "":
+                # No size and not a register: infer from op1's size
+                op_info[0] = op_info[2]
+            else:
+                raise SyntaxError(f"INVALID SYNTAX FORMAT AT LINE {self.rip}!")
+
+        # Needs updating as setting logic has changed
+        self.set_operand("op1", op_info[3], int(op_info[2]))
+        if has_op2:
             self.set_operand("op2", op_info[1], int(op_info[0]))
     
     def calculate_memory_address(self, expression: str) -> int:
