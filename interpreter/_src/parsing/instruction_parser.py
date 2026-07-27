@@ -85,7 +85,7 @@ class Instruction_Parser:
 
     def parse(self) -> None:
         try:
-            self.validate_operands(self.line)
+            self.validate_instruction_line(self.line)
             self.set_operand_type(self.line)
             self.set_operand_value_and_address(self.line)
         except SyntaxError as e:    # validate Operands
@@ -98,7 +98,7 @@ class Instruction_Parser:
     # General validation methods
     # -----------------------------------
     
-    def validate_operands(self, line: list[str]) -> None:
+    def validate_instruction_line(self, line: list[str]) -> None:
         """
         Validates the operands of the current instruction based on the number of operands provided in the line.\n
         Sets the operand attributes accordingly or raises a ValueError if the operands are invalid.
@@ -336,7 +336,6 @@ class Instruction_Parser:
         Tries to match size key words and skips over the expected operand, if it finds one else raises an exception. Also tries to match unspecified sized operands and tries to get their size (if register).
         If doesn't match either a size keyword or an operand format raises a SyntaxError.\n
         Returns pairs of sizes and operand expressions used in the declaration as list elements (always 4 elements but the sizes could be '""')
-        
         :param line: Line of code in which the operands are declared without the instruction previously removed
         :type line: list[str]
         :return: List os size and operand expression pairs always following the format: [size;op2;size;op1]
@@ -344,44 +343,45 @@ class Instruction_Parser:
         :raises SyntaxError: If comes across an invalid syntax format for assembly x86-64bit code
         :raises ValueError: If comes across a software bug (Unexpected but preventive)
         """
-        ret_list: list[str] = []
+        ret_list: list[str] = ["", "", "", ""]
         max_ret_value: int = 3  # 4 list elements
-        length: int = len(line) - 1
+        last_idx: int = len(line) - 1
+        size_directives = PM.SIZE_DIRECTIVES
+        operand_re = re.compile(fr'^({PM.OPERAND_PATTERN})$')  # precompiled, module/class level
 
-        # Verify each element of the list and tries to match either size keywords or an operand
-        for i in range(len(line)):
-            if line[i] in PM.SIZE_DIRECTIVES.keys():
-                # if a match with a size keyword happened verify it's position and if it's followed by an operand. If not raises SyntaxError to signal bad format
-                if i == length:
+        i = 0
+        while i < len(line):
+            token = line[i]
+            size = size_directives.get(token)
+
+            if size is not None:
+                if i == last_idx or not operand_re.match(line[i + 1]):
                     raise SyntaxError(f"INVALID SYNTAX FORMAT AT LINE {self.rip}!")
-                elif not re.match(fr'^({PM.OPERAND_PATTERN})$',line[i+1]):
-                    raise SyntaxError(f"INVALID SYNTAX FORMAT AT LINE {self.rip}!")
-                else:
-                    # Fail safe mechanism
-                    if max_ret_value <= 1:
-                        raise ValueError("Program parsing ran into a problem! Aborting execution ...")
-                    # Appends the values of the operator info to the list, appending always to the last position available
-                    ret_list[max_ret_value] = line[i+1]
-                    ret_list[max_ret_value-1] = str(PM.SIZE_DIRECTIVES[line[i]])
-                    # Skips over one element already accounted for
-                    i += 1
-                    max_ret_value -= 2
-            elif re.match(fr'^({PM.OPERAND_PATTERN})$',line[i-length]):
-                # If a match with an operand happened append it to the list and tries to get its size (if register), else appends a null size to the list to calculate/get later
-                ret_list[max_ret_value] = line[i]
-                if self.is_register(line[i]):
+                if max_ret_value <= 1:
+                    raise ValueError("Program parsing ran into a problem! Aborting execution ...")
+                ret_list[max_ret_value] = line[i + 1]
+                ret_list[max_ret_value - 1] = str(size)
+                max_ret_value -= 2
+                i += 2
+
+            elif operand_re.match(token):
+                if max_ret_value <= 1:
+                    raise ValueError("Program parsing ran into a problem! Aborting execution ...")
+                ret_list[max_ret_value] = token
+                if self.is_register(token):
                     try:
-                        ret_list[max_ret_value-1] = str(self.get_register_size(line[i]))
+                        ret_list[max_ret_value - 1] = str(self.get_register_size(token))
                     except SyntaxError as e:
                         print(e)
                         sys.exit(ExitCode.INVALID_INSTRUCTION_SYNTAX)
-                    max_ret_value -= 2
                 else:
-                    ret_list[max_ret_value-1] = ""
-                    max_ret_value -= 2
-            # If no match happened then the code could be faulty or bad syntax was used so raise a generic exception
+                    ret_list[max_ret_value - 1] = ""
+                max_ret_value -= 2
+                i += 1
+
             else:
                 raise ValueError("Program parsing ran into a problem! Aborting execution ...")
+
         return ret_list
 
     def get_operand(self, operand: str) -> list[str]:
