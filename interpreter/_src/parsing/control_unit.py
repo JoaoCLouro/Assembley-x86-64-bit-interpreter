@@ -57,7 +57,7 @@ class Control_Unit:
         self.current_instruction: str = ""
         self.op1: Operand = Operand()
         self.op2: Operand = Operand()
-        self.instruction_parser: Instruction_Parser = Instruction_Parser(self.op1, self.op2, self.labels)
+        self.instruction_parser: Instruction_Parser = Instruction_Parser(self.op1, self.op2, self.labels, self.constants, self.rodata_section, self.data_section, self.bss_section, self.registers)
 
 
     #---------------------------------
@@ -124,8 +124,8 @@ class Control_Unit:
         elif self.is_valid_instruction(line[0]):
             self.current_instruction = line[0]
             self.instruction_parser.line = line
+            self.instruction_parser.rip = self.rip
             try:
-                self.instruction_parser.rip = self.rip
                 self.instruction_parser.parse()
             except SyntaxError as e:
                 ...

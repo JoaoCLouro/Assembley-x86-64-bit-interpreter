@@ -5,7 +5,10 @@ from ...exit_codes import ExitCode
 
 from . import patter_matching_helpers as PM
 
-from ..helpers.my_types import LabelMap
+from ..helpers.my_types import LabelMap, ConstantMap, DataSectionInfo, BssSectionInfo
+
+from ..bridges.register_manager import Registers_Interface
+
 class Operand:
     __slots__ = [
         "expression",
@@ -71,16 +74,26 @@ class Operand:
         return self.valid
 
         
+GP_REGISTER_ORDER = [
+    "rax", "rbx", "rcx", "rdx", "rsi", "rdi", "rbp", "rsp",
+    "r8", "r9", "r10", "r11", "r12", "r13", "r14", "r15",
+]
 
+FPU_REGISTER_ORDER = [f"xmm{i}" for i in range(16)] + [f"ymm{i}" for i in range(16)]
 
 class Instruction_Parser:
     
-    __slots__ = ("op1","op2","line", "labels", "rip", "expected_op_count")
+    __slots__ = ("op1","op2","line", "labels", "constants", "rodata", "data", "bss", "expected_op_count", "rip", "registers")
 
-    def __init__ (self, op1: Operand, op2: Operand, labels: LabelMap, expected_op_count: int = 0, line: list[str]=[]):
+    def __init__ (self, op1: Operand, op2: Operand, labels: LabelMap, constants: ConstantMap, rodata: DataSectionInfo, data: DataSectionInfo, bss: BssSectionInfo, registers: Registers_Interface, expected_op_count: int = 0, line: list[str]=[]):
         self.op1: Operand = op1
         self.op2: Operand = op2
         self.labels = labels
+        self.constants = constants
+        self.rodata = rodata
+        self.data = data
+        self.bss = bss
+        self.registers: Registers_Interface = registers
         self.line = line
         self.expected_op_count = expected_op_count
         self.rip: int = -1 # Reset immediately before any call to parser
@@ -93,7 +106,17 @@ class Instruction_Parser:
 
 
     def parse_operands(self, line: list [str]) -> None:
-        operand_info: list[str] = self.get_operand_info(line) 
+        operand_info: list[str] = self.get_operand_info(line)
+
+        # Eliminates none operands
+        if operand_info[3] == "":
+            # No operands
+            operand_info = []
+        elif operand_info[1] == "":
+            # Only one operands
+            operand_info = operand_info[2:]
+
+        self.solve_operands(operand_info)
 
     def get_operand_info(self, line: list[str]) -> list[str]:
         """
@@ -149,7 +172,214 @@ class Instruction_Parser:
                 raise ValueError("Program parsing ran into a problem! Aborting execution ...")
         return ret_list
 
-        
+    def solve_operands(self, operands_info: list[str]) -> None:
+        """
+        Decomposes and solves each operand declaration, computing final numeric memory addresses for memory operands,
+        resolving labels/constants to their values, and determining register ordinals — then sets self.op1 and
+        self.op2 (Operand instances) accordingly via Operand.set(). Registers and immediates keep their expression
+        besides label/constant substitution; memory expressions are replaced by their final computed address in
+        bracket form.\n
+        Expects operands_info in the [size;op2;size;op1] format produced by get_operand_info (or [] if the
+        instruction takes 0 operands, in which case self.op1/self.op2 are cleared).
+
+        :param operands_info: List of size/operand-expression pairs, or [] for a 0-operand instruction
+        :type operands_info: list[str]
+        :return: None. Sets or clears self.op1 and self.op2 in place.
+        :rtype: None
+        :raises SyntaxError: If a label or constant reference cannot be resolved, or a memory expression is malformed
+        :raises ValueError: If comes across a software bug (Unexpected but preventive)
+        """
+        if not operands_info:
+            self.op1.clear()
+            self.op2.clear()
+            return
+
+        # (operand_instance, size_idx, expr_idx) — op2 uses indices 0/1, op1 uses indices 2/3
+        for operand_obj, size_idx, expr_idx in ((self.op2, 0, 1), (self.op1, 2, 3)):
+            expr = operands_info[expr_idx]
+
+            if expr == "":
+                operand_obj.clear()
+                continue
+
+            size = int(operands_info[size_idx])
+
+            if self.is_register(expr):
+                self._solve_register_operand(operand_obj, expr, size)
+            elif self.is_memory(expr):
+                self._solve_memory_operand_into(operand_obj, expr, size)
+            elif self.is_number(expr):
+                operand_obj.set(expr, 2, 0, size)
+            elif self.is_label(expr):
+                resolved = self._solve_label_or_constant(expr)
+                operand_obj.set(str(resolved), 2, 0, size)
+            else:
+                raise ValueError("Program parsing ran into a problem! Aborting execution ...")
+
+
+    def _solve_register_operand(self, operand_obj: "Operand", expr: str, size: int) -> None:
+        """
+        Sets an Operand instance for a register operand: expression is the register name itself, address is the
+        register's ordinal position in its family's canonical list, is_high flags byte-high aliases (ah/bh/ch/dh).
+
+        :param operand_obj: The Operand instance to set (self.op1 or self.op2)
+        :type operand_obj: Operand
+        :param expr: Register name, without leading '%'
+        :type expr: str
+        :param size: Declared/inferred size in bytes
+        :type size: int
+        """
+        is_high = 1 if re.fullmatch(r'[abcd]h', expr) else 0
+
+        if self.is_fpu_register(expr):
+            address = FPU_REGISTER_ORDER.index(expr)
+        else:
+            parent = self._get_parent_register(expr)
+            address = GP_REGISTER_ORDER.index(parent)
+
+        operand_obj.set(expr, 1, address, size, is_high=is_high)
+
+
+    def _solve_memory_operand_into(self, operand_obj: "Operand", expr: str, size: int) -> None:
+        """
+        Sets an Operand instance for a memory operand: expression is the final computed address in bracket form,
+        address is the computed numeric address.
+
+        :param operand_obj: The Operand instance to set (self.op1 or self.op2)
+        :type operand_obj: Operand
+        :param expr: Memory addressing expression, including enclosing brackets
+        :type expr: str
+        :param size: Declared/inferred size in bytes
+        :type size: int
+        """
+        computed_address = self._solve_memory_operand(expr)
+        operand_obj.set(f"[{computed_address}]", 0, computed_address, size)
+
+
+    def _get_parent_register(self, register: str) -> str:
+        """
+        Maps any general-purpose register alias (byte/word/dword/qword form) to its canonical 64-bit family name.
+
+        :param register: Register name, without leading '%'
+        :type register: str
+        :return: The 64-bit register name this register is an alias of (e.g. 'al' -> 'rax', 'r9d' -> 'r9')
+        :rtype: str
+        """
+        match = re.fullmatch(r'(r(?:[89]|1[0-5]))[bdlw]?', register)
+        if match:
+            return match.group(1)
+
+        alias_map = {"a": "rax", "b": "rbx", "c": "rcx", "d": "rdx"}
+        if re.fullmatch(r'[abcd][hl]', register):
+            return alias_map[register[0]]
+        if re.fullmatch(r'[er]?[abcd]x', register):
+            return alias_map[register[-2]]
+
+        special_map = {
+            "sp": "rsp", "esp": "rsp", "rsp": "rsp",
+            "bp": "rbp", "ebp": "rbp", "rbp": "rbp",
+            "si": "rsi", "esi": "rsi", "rsi": "rsi",
+            "di": "rdi", "edi": "rdi", "rdi": "rdi",
+        }
+        if register in special_map:
+            return special_map[register]
+
+        raise ValueError(f"Program parsing ran into a problem! Unrecognized register alias: '{register}'")
+
+
+    # ------------------
+    # Operand Decoders
+    # ------------------
+
+    def _solve_label_or_constant(self, name: str) -> int:
+        """
+        Resolves a bare identifier to either a label's .text line index or a constant's literal value.
+
+        :param name: Identifier to resolve
+        :type name: str
+        :return: The label's line index, or the constant's value
+        :rtype: int
+        :raises SyntaxError: If the identifier is neither a known label nor a known constant
+        """
+        if name in self.labels:
+            return self.labels[name]
+        if name in self.constants:
+            return int(self.constants[name]["value"])
+        raise SyntaxError(f"INVALID SYNTAX FORMAT AT LINE {self.rip}! Unresolved label or constant: '{name}'")
+
+
+    def _solve_memory_operand(self, operand: str) -> int:
+        """
+        Decomposes a memory addressing expression ([disp], [base], [base+disp], [base+index*scale+disp], etc.)
+        and computes the final numeric address, resolving any label/constant components and reading any register
+        components' current values.
+
+        :param operand: Memory addressing expression, including enclosing brackets
+        :type operand: str
+        :return: The computed numeric address
+        :rtype: int
+        :raises SyntaxError: If the memory expression is malformed or a component doesn't resolve
+        """
+        inner = operand.strip()[1:-1]  # strip enclosing '[' ']'
+
+        # Split into signed components: e.g. "ebx+ecx*4+8" -> ["ebx", "+ecx*4", "+8"]
+        tokens = re.findall(r'[+\-][^+\-]+|^[^+\-]+', inner.replace(" ", ""))
+
+        address = 0
+        for token in tokens:
+            sign = -1 if token.startswith('-') else 1
+            term = token.lstrip('+-')
+
+            if '*' in term:
+                # indexed component: register*scale
+                reg, scale = term.split('*')
+                try:
+                    value = self.registers.read_reg(reg) * int(scale)
+                except ValueError:
+                    raise SyntaxError(f"INVALID REGISTER NAME {reg} AT LINE {self.rip}!")
+            elif self.is_register(term):
+                try:
+                    value = self.registers.read_reg(term)
+                except ValueError:
+                    raise SyntaxError(f"INVALID REGISTER NAME {term} AT LINE {self.rip}!")
+            elif self.is_number(term):
+                value = self._parse_numeric_literal(term)
+            elif self.is_label(term):
+                value = self._solve_label_or_constant(term)
+            else:
+                raise SyntaxError(f"INVALID SYNTAX FORMAT AT LINE {self.rip}! Bad memory component: '{term}'")
+            address += sign * value
+        return address
+
+
+    def _parse_numeric_literal(self, literal: str) -> int:
+        """
+        Converts a numeric literal token (matching NUMBER_REPRESENTATION_PATTERN) into its integer value, handling
+        hex (0x...), suffix-hex (...h), binary (0b... or ...b), octal (0... , ...o, ...q), and decimal forms.
+
+        :param literal: Numeric literal token
+        :type literal: str
+        :return: The integer value of the literal
+        :rtype: int
+        :raises ValueError: If the literal doesn't match any recognized numeric format
+        """
+        if re.fullmatch(r'0[xX][\da-fA-F]+', literal):
+            return int(literal, 16)
+        if re.fullmatch(r'\d[\da-fA-F]*h', literal, re.IGNORECASE):
+            return int(literal[:-1], 16)
+        if re.fullmatch(r'0[bB][01]+', literal):
+            return int(literal, 2)
+        if re.fullmatch(r'[01]+b', literal, re.IGNORECASE):
+            return int(literal[:-1], 2)
+        if re.fullmatch(r'0[dD]\d+', literal):
+            return int(literal[2:], 10)
+        if re.fullmatch(r'[-+]?\d+d', literal, re.IGNORECASE):
+            return int(literal[:-1], 10)
+        if re.fullmatch(r'[0-7]+[oq]', literal, re.IGNORECASE):
+            return int(literal[:-1], 8)
+        if re.fullmatch(r'[-+]?\d+', literal):
+            return int(literal)
+        raise ValueError(f"Program parsing ran into a problem! Unrecognized numeric literal: '{literal}'")
 
     # ----------------------------
     # General validation methods
