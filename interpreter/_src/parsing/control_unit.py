@@ -57,7 +57,7 @@ class Control_Unit:
         self.current_instruction: str = ""
         self.op1: Operand = Operand()
         self.op2: Operand = Operand()
-        self.instruction_parser: Instruction_Parser = Instruction_Parser(self.op1, self.op2)
+        self.instruction_parser: Instruction_Parser = Instruction_Parser(self.op1, self.op2, self.labels)
 
 
     #---------------------------------
