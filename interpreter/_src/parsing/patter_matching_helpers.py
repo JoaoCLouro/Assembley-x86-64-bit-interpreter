@@ -1,6 +1,8 @@
 # -----------------------
 # SUPPORTED INSTRUCTIONS
 # -----------------------
+import re
+
 VALID_START: str = "_start"
 
 INSTRUCTIONS: dict[str, dict[str, int]] = {
@@ -62,7 +64,24 @@ NUMBER_REPRESENTATION_PATTERN = r'(0x[\da-fA-F]+|\d[\da-fA-F]*h|0b[01]+|[01]+b|0
 WORD_OR_CHARACTERS_PATTERN = r'(\".*?\"|\'.*?\')'
 IMMEDIATE_VALUE_PATTERN = fr'({NUMBER_REPRESENTATION_PATTERN}|{WORD_OR_CHARACTERS_PATTERN})'
 REGISTER_PATTERN = fr'({GENERAL_PURPOSE_REGISTERS_PATTERN}|{FPU_REGISTERS_PATTERN})'
-CONSTANTS_AND_LABELS_PATTERN = r'\b[a-zA-Z_]\w*\b'
+
+# Directives for size identification and memory allocation verification.
+# Defined here (ahead of its original location further down) because
+# CONSTANTS_AND_LABELS_PATTERN needs it to exclude these reserved keywords.
+SIZE_DIRECTIVES = {
+    'db': (1, True), 'dw': (2, True), 'dd': (4, True), 'dq': (8, True),
+    'resb': (1, False), 'resw': (2, False), 'resd': (4, False), 'resq': (8, False)
+}
+
+# A bare identifier is only a valid label/constant if it ISN'T one of the
+# reserved size-directive keywords. Without this exclusion, a token like
+# "db" satisfies both SIZE_DIRECTIVES membership AND this pattern, making
+# instruction-shape matching ambiguous (e.g. ["db", "rax"] could be read as
+# a 1-operand instruction with a size prefix, or as two bare operands/labels
+# "db" and "rax"). Excluding reserved words here removes the ambiguity for
+# every consumer of OPERAND_PATTERN and is_label, not just one call site.
+_RESERVED_KEYWORDS_PATTERN = "|".join(re.escape(k) for k in SIZE_DIRECTIVES.keys())
+CONSTANTS_AND_LABELS_PATTERN = fr'\b(?!(?:{_RESERVED_KEYWORDS_PATTERN})\b)[a-zA-Z_]\w*\b'
 
 DIRECT_AND_BASE_ADDRESSING_PATTERN = fr'^\[(?:\s*){COMPONENTS_ADDRESSING_PATTERN}(?:\s)*([\+\-](?:\s)*{COMPONENTS_ADDRESSING_PATTERN})*(?:\s)*\]$'
 INDEXED_ADDRESSING_PATTERN = fr'^\[(?:\s*){COMPONENTS_ADDRESSING_PATTERN}(?:\s)*([\+\-\*](?:\s)*{COMPONENTS_ADDRESSING_PATTERN})*(?:\s)*\]$'
@@ -75,12 +94,6 @@ OPERAND_PATTERN = fr'(?:{MEMORY_ADDRESSING_PATTERN}|{REGISTER_PATTERN}|{IMMEDIAT
 # ------------------------------------
 # Segment Mapper Helpers
 # ------------------------------------
-
-# Directives for size identification and memory allocation verification
-SIZE_DIRECTIVES = {
-    'db': (1, True), 'dw': (2, True), 'dd': (4, True), 'dq': (8, True),
-    'resb': (1, False), 'resw': (2, False), 'resd': (4, False), 'resq': (8, False)
-}
 
 # Architecture Constants for sections start and memory allocation
 TEXT_BASE = 0x400000

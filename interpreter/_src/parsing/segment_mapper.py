@@ -7,7 +7,7 @@ from ..helpers.my_types import DataSectionInfo, BssSectionInfo, LabelMap, Consta
 from ..bridges.data_memory import Data_Memory
 from ..bridges.register_manager import Registers_Interface
 
-from .patter_matching_helpers import VALID_START, SIZE_DIRECTIVES, RODATA_BASE, DATA_BASE, BSS_BASE, STACK_START, TOKENS_PATTERN, ELEMENTS_TO_SKIP
+from .patter_matching_helpers import VALID_START, SIZE_DIRECTIVES, RODATA_BASE, DATA_BASE, BSS_BASE, STACK_START, TOKENS_PATTERN, ELEMENTS_TO_SKIP, _RESERVED_KEYWORDS_PATTERN
 
 from interpreter.exit_codes import ExitCode
 
@@ -525,11 +525,14 @@ class Segment_Mapper:
                 index += 1
                 continue
             elif len(line) == 1 and line[0].endswith(":"):
-                if (Segment_Mapper._exists_in_section(line[0], self.labels)):
-                    print(f"Label {line[0]} is duplicate on line {index}. Exiting program on a SyntaxError...")
+                variable = line[0].strip(":")
+                if (Segment_Mapper._exists_in_section(variable, self.labels)):
+                    print(f"Label {variable} is duplicate on line {index}. Exiting program on a SyntaxError...")
                     sys.exit(ExitCode.DUPLICATE_LABEL)
+                elif not Segment_Mapper._valid_variable_name(variable):
+                    sys.exit(ExitCode.RESERVED_KEYWORD_VIOLATION)
                 else:
-                    self.labels[line[0]] = index
+                    self.labels[variable] = index
             index += 1
 
 
@@ -961,7 +964,10 @@ class Segment_Mapper:
         :return: True if the variable name is valid, False otherwise
         :rtype: bool
         """
-        if not re.match(r'^[A-Za-z_][A-Za-z0-9_]*$', name.strip(":")):
+        name = name.strip(":")
+        if not re.match(r'^[A-Za-z_][A-Za-z0-9_]*$', name):
+            return False
+        elif re.fullmatch(fr'(?:{_RESERVED_KEYWORDS_PATTERN})', name, re.IGNORECASE):
             return False
         return True
 

@@ -19,6 +19,42 @@ class TestSegmentMapperStaticHelpers(unittest.TestCase):
         self.assertFalse(Segment_Mapper._valid_variable_name("var name"))
         self.assertFalse(Segment_Mapper._valid_variable_name(""))
 
+    def test_valid_variable_name_rejects_exact_reserved_keywords(self):
+        # Exact size-directive keywords (case-insensitive) must be rejected,
+        # since they'd otherwise collide with SIZE_DIRECTIVES token meaning.
+        for keyword in ("db", "dw", "dd", "dq", "resb", "resw", "resd", "resq"):
+            with self.subTest(keyword=keyword):
+                self.assertFalse(Segment_Mapper._valid_variable_name(keyword))
+                self.assertFalse(Segment_Mapper._valid_variable_name(keyword.upper()))
+                self.assertFalse(Segment_Mapper._valid_variable_name(keyword.capitalize()))
+
+    def test_valid_variable_name_accepts_names_prefixed_by_reserved_keywords(self):
+        # Regression guard: a name that merely STARTS WITH a reserved keyword
+        # as a substring is a distinct, legitimate identifier and must NOT be
+        # rejected. This previously failed because the reserved-keyword check
+        # used an unanchored re.match instead of re.fullmatch, so e.g. "dw"
+        # matched as a prefix of "dword_counter" and wrongly rejected it.
+        valid_names = [
+            "dword_counter",
+            "resbuffer",
+            "ddata",
+            "dqword_val",
+            "db_index",
+            "resq_total",
+            "dwarf",
+        ]
+        for name in valid_names:
+            with self.subTest(name=name):
+                self.assertTrue(Segment_Mapper._valid_variable_name(name))
+
+    def test_valid_variable_name_reserved_keyword_with_colon_suffix(self):
+        # Label declarations often carry a trailing ':' (e.g. "db:") which
+        # _valid_variable_name strips before checking; the reserved-keyword
+        # rejection must still apply after stripping.
+        self.assertFalse(Segment_Mapper._valid_variable_name("db:"))
+        self.assertFalse(Segment_Mapper._valid_variable_name("resq:"))
+        self.assertTrue(Segment_Mapper._valid_variable_name("dword_counter:"))
+
     def test_is_numeric(self):
         # Base cases: Decimals and Hex
         self.assertTrue(Segment_Mapper._is_numeric("1024"))
@@ -230,13 +266,40 @@ class TestSegmentMapperTextAndLabelDiscovery(unittest.TestCase):
     def test_fetch_labels_duplicate_catcher(self, mock_print, mock_exit):
         self.mapper.memory_list = [["loop_start:"], ["end_label:"]]
         self.mapper.fetch_labels(0)
-        self.assertIn("loop_start:", self.mapper.labels)
-        self.assertIn("end_label:", self.mapper.labels)
+        # Labels are stored WITHOUT the trailing colon (stripped), consistent
+        # with how the duplicate-check lookup strips it before comparing.
+        self.assertIn("loop_start", self.mapper.labels)
+        self.assertIn("end_label", self.mapper.labels)
 
-        self.mapper.labels = {"duplicate_label:": 0}
+        self.mapper.labels = {"duplicate_label": 0}
         self.mapper.memory_list = [["duplicate_label:"]]
         self.mapper.fetch_labels(0)
         mock_exit.assert_called_once_with(ExitCode.DUPLICATE_LABEL)
+
+    def test_fetch_labels_stores_valid_label_with_correct_line_index(self):
+        # Regression guard: fetch_labels previously nested the
+        # self.labels[...] assignment inside the "invalid name" elif branch,
+        # so a syntactically valid, non-duplicate label was silently never
+        # recorded in self.labels at all (the dict stayed empty). This must
+        # now actually populate self.labels, keyed by the label's line index.
+        self.mapper.memory_list = [["mov", "rax", "rbx"], ["my_func:"], ["ret"]]
+
+        self.mapper.fetch_labels(0)
+
+        self.assertEqual(self.mapper.labels, {"my_func": 1})
+
+    @patch('sys.exit')
+    @patch('builtins.print')
+    def test_fetch_labels_rejects_reserved_keyword_as_label(self, mock_print, mock_exit):
+        # A label using a reserved size-directive keyword (e.g. "db:") must
+        # be rejected via ExitCode.RESERVED_KEYWORD_VIOLATION, and must NOT
+        # be added to self.labels.
+        self.mapper.memory_list = [["db:"]]
+
+        self.mapper.fetch_labels(0)
+
+        mock_exit.assert_called_once_with(ExitCode.RESERVED_KEYWORD_VIOLATION)
+        self.assertNotIn("db", self.mapper.labels)
 
 
 class TestSegmentMapperMemoryWritingAndConstants(unittest.TestCase):

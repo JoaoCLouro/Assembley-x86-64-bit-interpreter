@@ -2,14 +2,34 @@ import sys
 import re
 
 from ...exit_codes import ExitCode
-
 from . import patter_matching_helpers as PM
-
 from ..helpers.my_types import LabelMap, ConstantMap, DataSectionInfo, BssSectionInfo
-
 from ..bridges.register_manager import Registers_Interface
 
+
 class Operand:
+    """
+    Represents a decoded operand for an x86-64 assembly instruction.
+
+    Stores metadata regarding operand classification (register, memory, immediate),
+    evaluated numeric memory addresses or register ordinals, byte sizes, high-byte flags,
+    and usability state.
+
+    :param valid: Indicates whether the operand holds active/valid decoded data
+    :type valid: bool
+    :param expression: Unprocessed or reconstructed string expression of the operand
+    :type expression: str
+    :param type: Numeric classification identifier (0: MEMORY, 1: REGISTER, 2: IMMEDIATE)
+    :type type: int
+    :param address: Evaluated numeric memory address or canonical register ordinal index
+    :type address: int
+    :param size: Declared or inferred size of the operand in bytes (1, 2, 4, 8, 16, 32)
+    :type size: int
+    :param is_high: Flag indicating high 8-bit register access (1 for ah, bh, ch, dh; else 0)
+    :type is_high: int
+    :param is_signed: Flag indicating signed register or arithmetic operand operations
+    :type is_signed: int
+    """
     __slots__ = [
         "expression",
         "type",
@@ -26,29 +46,15 @@ class Operand:
         """
         self.valid: bool = False  # Information validity flag for usability
         self.expression: str = ""
-        self.type: int = 0  # OpType enum (e.g., REGISTER, MEMORY, IMMEDIATE)
+        self.type: int = 0  # OpType enum (e.g., REGISTER=1, MEMORY=0, IMMEDIATE=2)
         self.address: int = 0  # Virtual address or register index (long long)
-        self.size: int = 0  # Size in bytes (1, 2, 4, 8)
+        self.size: int = 0  # Size in bytes (1, 2, 4, 8, 16, 32)
         self.is_high: int = 0  # Flag for high register access (e.g., AH, BH)
         self.is_signed: int = 0  # Flag for signed register/operand operations
 
     def set(self, expression: str, op_type: int, address: int, size: int, is_high: int = 0, is_signed: int = 0) -> None:
         """
-        Sets the parameters of the operand.
-        Sets validity to True and enables use of this Operand info.
-
-        :param expression: Unprocessed expression of the operand
-        :type expression: str
-        :param op_type: Type of the operand (OpType enum integer)
-        :type op_type: int
-        :param address: Virtual address for memory or register index
-        :type address: int
-        :param size: Number of bytes to use (1, 2, 4, 8)
-        :type size: int
-        :param is_high: High register byte indicator (0 or 1)
-        :type is_high: int
-        :param is_signed: Signed operand indicator (0 or 1)
-        :type is_signed: int
+        Sets the parameters of the operand and enables use of this Operand info.
         """
         self.valid = True
         self.expression = expression
@@ -63,17 +69,20 @@ class Operand:
         Sets the validity parameter to False to signal not current/usable information.
         """
         self.valid = False
+        self.expression = ""
+        self.type = 0
+        self.address = 0
+        self.size = 0
+        self.is_high = 0
+        self.is_signed = 0
 
     def is_valid(self) -> bool:
         """
         Returns the usability status of this Operand object.
-
-        :return: True if the operand can be used, False otherwise.
-        :rtype: bool
         """
         return self.valid
 
-        
+
 GP_REGISTER_ORDER = [
     "rax", "rbx", "rcx", "rdx", "rsi", "rdi", "rbp", "rsp",
     "r8", "r9", "r10", "r11", "r12", "r13", "r14", "r15",
@@ -81,11 +90,81 @@ GP_REGISTER_ORDER = [
 
 FPU_REGISTER_ORDER = [f"xmm{i}" for i in range(16)] + [f"ymm{i}" for i in range(16)]
 
-class Instruction_Parser:
-    
-    __slots__ = ("op1","op2","line", "labels", "constants", "rodata", "data", "bss", "expected_op_count", "rip", "registers")
+# Pre-compiled module-level patterns for fast instruction layout matching
+#
+# NOTE: PM.OPERAND_PATTERN embeds its own internal '^'/'$' anchors inside the
+# memory-addressing sub-patterns (e.g. DIRECT_AND_BASE_ADDRESSING_PATTERN is
+# '^\[...\]$'). str.strip("^$") only removes characters from the very start/
+# end of the *whole* pattern string, so those embedded anchors survive
+# untouched — which previously broke any 2-operand match where one operand
+# was a memory expression (the embedded '^...$' forced that operand alone to
+# match the entire joined string). re.sub removes every occurrence, wherever
+# it appears, which is what's actually needed here.
+_ANCHOR_CHARS = re.compile(r'[\^$]')
+_SIZE_PATTERN_STR = fr'(?:{"|".join(re.escape(_ANCHOR_CHARS.sub("", k)) for k in PM.SIZE_DIRECTIVES.keys())})'
+_OP_PATTERN_STR = fr'(?:{_ANCHOR_CHARS.sub("", PM.OPERAND_PATTERN)})'
 
-    def __init__ (self, op1: Operand, op2: Operand, labels: LabelMap, constants: ConstantMap, rodata: DataSectionInfo, data: DataSectionInfo, bss: BssSectionInfo, registers: Registers_Interface, expected_op_count: int = 0, line: list[str]=[]):
+ONE_OPERAND_PATTERN = re.compile(
+    fr'^(?:{_SIZE_PATTERN_STR}\s*,\s*{_OP_PATTERN_STR}|{_OP_PATTERN_STR})$',
+    re.IGNORECASE
+)
+
+TWO_OPERAND_PATTERN = re.compile(
+    fr'^(?:'
+    fr'{_SIZE_PATTERN_STR}\s*,\s*{_OP_PATTERN_STR}\s*,\s*{_SIZE_PATTERN_STR}\s*,\s*{_OP_PATTERN_STR}|'
+    fr'{_OP_PATTERN_STR}\s*,\s*{_OP_PATTERN_STR}|'
+    fr'{_SIZE_PATTERN_STR}\s*,\s*{_OP_PATTERN_STR}\s*,\s*{_OP_PATTERN_STR}|'
+    fr'{_OP_PATTERN_STR}\s*,\s*{_SIZE_PATTERN_STR}\s*,\s*{_OP_PATTERN_STR}'
+    fr')$',
+    re.IGNORECASE
+)
+
+
+class Instruction_Parser:
+    """
+    Validates, tokenizes, and resolves operands for x86-64 assembly instructions.
+
+    Parses tokenized assembly lines, verifies structural layout against expected operand counts,
+    resolves symbolic identifiers (labels and constants), evaluates memory addressing expressions
+    against current register states, and populates target `Operand` instances.
+
+    :param op1: Destination/first operand instance updated by parsing operations
+    :type op1: Operand
+    :param op2: Source/second operand instance updated by parsing operations
+    :type op2: Operand
+    :param labels: Map linking label identifiers to target .text line indices
+    :type labels: LabelMap
+    :param constants: Map linking constant identifiers to literal value definitions
+    :type constants: ConstantMap
+    :param rodata: Data section structure for read-only constant data
+    :type rodata: DataSectionInfo
+    :param data: Data section structure for initialized writable data
+    :type data: DataSectionInfo
+    :param bss: Data section structure for uninitialized writable memory
+    :type bss: BssSectionInfo
+    :param registers: Interface bridge used to query live CPU register values during address computation
+    :type registers: Registers_Interface
+    :param expected_op_count: Number of operands required by the current instruction opcode
+    :type expected_op_count: int
+    :param line: Tokenized assembly instruction line (e.g., ['mov', 'rax', 'rbx'])
+    :type line: list[str]
+    """
+
+    __slots__ = (
+        "op1",
+        "op2",
+        "line",
+        "labels",
+        "constants",
+        "rodata",
+        "data",
+        "bss",
+        "expected_op_count",
+        "rip",
+        "registers",
+    )
+
+    def __init__(self, op1: Operand, op2: Operand, labels: LabelMap, constants: ConstantMap, rodata: DataSectionInfo, data: DataSectionInfo, bss: BssSectionInfo, registers: Registers_Interface):
         self.op1: Operand = op1
         self.op2: Operand = op2
         self.labels = labels
@@ -94,100 +173,109 @@ class Instruction_Parser:
         self.data = data
         self.bss = bss
         self.registers: Registers_Interface = registers
-        self.line = line
-        self.expected_op_count = expected_op_count
-        self.rip: int = -1 # Reset immediately before any call to parser
-    
+
+        # Attributes to update in run time
+        self.line = []
+        self.expected_op_count = -1
+        self.rip: int = -1  # Reset immediately before any call to parser
 
     def parse(self) -> None:
+        """
+        Executes the primary validation and parsing pipeline for the current instruction line.
+
+        Verifies the tokenized instruction line against expected layout rules and operand counts.
+        If validation succeeds, triggers operand extraction and address/value resolution.
+
+        :return: None
+        :rtype: None
+        :raises SyntaxError: If the instruction tokens violate structural rules or expected operand counts at `self.rip`.
+        """
         if not self.validate_instruction_line(self.line):
-            raise SyntaxError (f"Invalid instruction declaration syntax at line {self.rip}.")    
+            raise SyntaxError(f"Invalid instruction declaration syntax at line {self.rip}.")
         self.parse_operands(self.line[1:])
 
+    def parse_operands(self, line: list[str]) -> None:
+        """
+        Extracts raw size and operand expression pairs and triggers operand resolution.
+        Delegates token processing to `get_operand_info` to construct a standardized 4-element
+        tuple `[size2, op2, size1, op1]`, handles empty operand cases for 0-operand instructions,
+        and passes the result to `solve_operands`.
 
-    def parse_operands(self, line: list [str]) -> None:
+        :param line: List of instruction tokens excluding the instruction in use.
+        :type line: list[str]
+        :return: None
+        :rtype: None
+        :raises SyntaxError: If operand syntax or size directive placement is invalid.
+        :raises ValueError: If internal token indexing boundaries are exceeded.
+        """
         operand_info: list[str] = self.get_operand_info(line)
 
-        # Eliminates none operands
+        # Eliminate empty operand tuples for 0-operand instructions
         if operand_info[3] == "":
-            # No operands
             operand_info = []
-        elif operand_info[1] == "":
-            # Only one operands
-            operand_info = operand_info[2:]
 
         self.solve_operands(operand_info)
 
     def get_operand_info(self, line: list[str]) -> list[str]:
         """
-        Dynamically parses the operand declarations of an instruction.\n
-        Tries to match size key words and skips over the expected operand, if it finds one else raises an exception. Also tries to match unspecified sized operands and tries to get their size (if register).
-        If doesn't match either a size keyword or an operand format raises a SyntaxError.\n
-        Returns pairs of sizes and operand expressions used in the declaration as list elements (always 4 elements but the sizes could be '""')
-            
-        :param line: Line of code in which the operands are declared without the instruction previously removed
+        Dynamically parses the operand declarations of an instruction.
+        Tries to match size keywords and skips over the expected operand.
+        Returns size and operand expression pairs in the format: [size2, op2, size1, op1]
+
+        :param line: Line of code without the instruction mnemonic
         :type line: list[str]
-        :return: List os size and operand expression pairs always following the format: [size;op2;size;op1]
+        :return: List of size and operand expression pairs
         :rtype: list[str]
-        :raises SyntaxError: If comes across an invalid syntax format for assembly x86-64bit code
-        :raises ValueError: If comes across a software bug (Unexpected but preventive)
+        :raises SyntaxError: If syntax is invalid for x86-64 code
+        :raises ValueError: If an internal parsing limit error occurs
         """
         ret_list: list[str] = ["", "", "", ""]
-        max_ret_value: int = 3 
+        max_ret_value: int = 3
         last_idx: int = len(line) - 1
         size_directives = PM.SIZE_DIRECTIVES
         operand_re = re.compile(fr'^({PM.OPERAND_PATTERN})$')
-    
+
         i = 0
         while i < len(line):
             token = line[i]
-            size = size_directives.get(token)
-    
+            size_entry = size_directives.get(token)
+            # SIZE_DIRECTIVES values are (byte_size, is_initialized) tuples;
+            # only the byte size is relevant to the returned size string.
+            size = size_entry[0] if size_entry is not None else None
+
             if size is not None:
                 if i == last_idx or not operand_re.match(line[i + 1]):
                     raise SyntaxError(f"INVALID SYNTAX FORMAT AT LINE {self.rip}!")
-                if max_ret_value <= 1:
+                if max_ret_value < 1:
                     raise ValueError("Program parsing ran into a problem! Aborting execution ...")
                 ret_list[max_ret_value] = line[i + 1]
                 ret_list[max_ret_value - 1] = str(size)
                 max_ret_value -= 2
                 i += 2
-    
+
             elif operand_re.match(token):
-                if max_ret_value <= 1:
+                if max_ret_value < 1:
                     raise ValueError("Program parsing ran into a problem! Aborting execution ...")
                 ret_list[max_ret_value] = token
                 if self.is_register(token):
-                    try:
-                        ret_list[max_ret_value - 1] = str(self.get_register_size(token, self.rip))
-                    except SyntaxError as e:
-                        print(e)
-                        sys.exit(ExitCode.INVALID_INSTRUCTION_SYNTAX)
+                    ret_list[max_ret_value - 1] = str(self.get_register_size(token, self.rip))
                 else:
                     ret_list[max_ret_value - 1] = ""
                 max_ret_value -= 2
                 i += 1
-    
+
             else:
                 raise ValueError("Program parsing ran into a problem! Aborting execution ...")
         return ret_list
 
     def solve_operands(self, operands_info: list[str]) -> None:
         """
-        Decomposes and solves each operand declaration, computing final numeric memory addresses for memory operands,
-        resolving labels/constants to their values, and determining register ordinals — then sets self.op1 and
-        self.op2 (Operand instances) accordingly via Operand.set(). Registers and immediates keep their expression
-        besides label/constant substitution; memory expressions are replaced by their final computed address in
-        bracket form.\n
-        Expects operands_info in the [size;op2;size;op1] format produced by get_operand_info (or [] if the
-        instruction takes 0 operands, in which case self.op1/self.op2 are cleared).
+        Decomposes and solves each operand declaration, computing final numeric memory addresses,
+        resolving labels/constants, and determining register ordinals — then sets self.op1 and
+        self.op2 (Operand instances) accordingly.
 
-        :param operands_info: List of size/operand-expression pairs, or [] for a 0-operand instruction
+        :param operands_info: List of size/operand-expression pairs, or [] for 0-operand instructions
         :type operands_info: list[str]
-        :return: None. Sets or clears self.op1 and self.op2 in place.
-        :rtype: None
-        :raises SyntaxError: If a label or constant reference cannot be resolved, or a memory expression is malformed
-        :raises ValueError: If comes across a software bug (Unexpected but preventive)
         """
         if not operands_info:
             self.op1.clear()
@@ -202,32 +290,24 @@ class Instruction_Parser:
                 operand_obj.clear()
                 continue
 
-            size = int(operands_info[size_idx])
+            size_str = operands_info[size_idx]
+            size = int(size_str) if size_str != "" else 0
 
             if self.is_register(expr):
                 self._solve_register_operand(operand_obj, expr, size)
             elif self.is_memory(expr):
                 self._solve_memory_operand_into(operand_obj, expr, size)
             elif self.is_number(expr):
-                operand_obj.set(expr, 2, 0, size)
+                operand_obj.set(expr, 2, self._parse_numeric_literal(expr), size)
             elif self.is_label(expr):
                 resolved = self._solve_label_or_constant(expr)
-                operand_obj.set(str(resolved), 2, 0, size)
+                operand_obj.set(str(resolved), 2, resolved, size)
             else:
                 raise ValueError("Program parsing ran into a problem! Aborting execution ...")
 
-
-    def _solve_register_operand(self, operand_obj: "Operand", expr: str, size: int) -> None:
+    def _solve_register_operand(self, operand_obj: Operand, expr: str, size: int) -> None:
         """
-        Sets an Operand instance for a register operand: expression is the register name itself, address is the
-        register's ordinal position in its family's canonical list, is_high flags byte-high aliases (ah/bh/ch/dh).
-
-        :param operand_obj: The Operand instance to set (self.op1 or self.op2)
-        :type operand_obj: Operand
-        :param expr: Register name, without leading '%'
-        :type expr: str
-        :param size: Declared/inferred size in bytes
-        :type size: int
+        Sets an Operand instance for a register operand.
         """
         is_high = 1 if re.fullmatch(r'[abcd]h', expr) else 0
 
@@ -239,31 +319,16 @@ class Instruction_Parser:
 
         operand_obj.set(expr, 1, address, size, is_high=is_high)
 
-
-    def _solve_memory_operand_into(self, operand_obj: "Operand", expr: str, size: int) -> None:
+    def _solve_memory_operand_into(self, operand_obj: Operand, expr: str, size: int) -> None:
         """
-        Sets an Operand instance for a memory operand: expression is the final computed address in bracket form,
-        address is the computed numeric address.
-
-        :param operand_obj: The Operand instance to set (self.op1 or self.op2)
-        :type operand_obj: Operand
-        :param expr: Memory addressing expression, including enclosing brackets
-        :type expr: str
-        :param size: Declared/inferred size in bytes
-        :type size: int
+        Sets an Operand instance for a memory operand.
         """
         computed_address = self._solve_memory_operand(expr)
         operand_obj.set(f"[{computed_address}]", 0, computed_address, size)
 
-
     def _get_parent_register(self, register: str) -> str:
         """
-        Maps any general-purpose register alias (byte/word/dword/qword form) to its canonical 64-bit family name.
-
-        :param register: Register name, without leading '%'
-        :type register: str
-        :return: The 64-bit register name this register is an alias of (e.g. 'al' -> 'rax', 'r9d' -> 'r9')
-        :rtype: str
+        Maps any general-purpose register alias to its canonical 64-bit family name.
         """
         match = re.fullmatch(r'(r(?:[89]|1[0-5]))[bdlw]?', register)
         if match:
@@ -286,20 +351,13 @@ class Instruction_Parser:
 
         raise ValueError(f"Program parsing ran into a problem! Unrecognized register alias: '{register}'")
 
-
     # ------------------
     # Operand Decoders
     # ------------------
 
     def _solve_label_or_constant(self, name: str) -> int:
         """
-        Resolves a bare identifier to either a label's .text line index or a constant's literal value.
-
-        :param name: Identifier to resolve
-        :type name: str
-        :return: The label's line index, or the constant's value
-        :rtype: int
-        :raises SyntaxError: If the identifier is neither a known label nor a known constant
+        Resolves a bare identifier to either a label's line index or a constant's literal value.
         """
         if name in self.labels:
             return self.labels[name]
@@ -307,22 +365,13 @@ class Instruction_Parser:
             return int(self.constants[name]["value"])
         raise SyntaxError(f"INVALID SYNTAX FORMAT AT LINE {self.rip}! Unresolved label or constant: '{name}'")
 
-
     def _solve_memory_operand(self, operand: str) -> int:
         """
-        Decomposes a memory addressing expression ([disp], [base], [base+disp], [base+index*scale+disp], etc.)
-        and computes the final numeric address, resolving any label/constant components and reading any register
-        components' current values.
-
-        :param operand: Memory addressing expression, including enclosing brackets
-        :type operand: str
-        :return: The computed numeric address
-        :rtype: int
-        :raises SyntaxError: If the memory expression is malformed or a component doesn't resolve
+        Decomposes a memory addressing expression and computes the final numeric address.
         """
         inner = operand.strip()[1:-1]  # strip enclosing '[' ']'
 
-        # Split into signed components: e.g. "ebx+ecx*4+8" -> ["ebx", "+ecx*4", "+8"]
+        # Split into signed components: e.g. "ebx+ecx*4-8" -> ["ebx", "+ecx*4", "-8"]
         tokens = re.findall(r'[+\-][^+\-]+|^[^+\-]+', inner.replace(" ", ""))
 
         address = 0
@@ -331,16 +380,15 @@ class Instruction_Parser:
             term = token.lstrip('+-')
 
             if '*' in term:
-                # indexed component: register*scale
                 reg, scale = term.split('*')
                 try:
                     value = self.registers.read_reg(reg) * int(scale)
-                except ValueError:
+                except Exception:
                     raise SyntaxError(f"INVALID REGISTER NAME {reg} AT LINE {self.rip}!")
             elif self.is_register(term):
                 try:
                     value = self.registers.read_reg(term)
-                except ValueError:
+                except Exception:
                     raise SyntaxError(f"INVALID REGISTER NAME {term} AT LINE {self.rip}!")
             elif self.is_number(term):
                 value = self._parse_numeric_literal(term)
@@ -351,17 +399,9 @@ class Instruction_Parser:
             address += sign * value
         return address
 
-
     def _parse_numeric_literal(self, literal: str) -> int:
         """
-        Converts a numeric literal token (matching NUMBER_REPRESENTATION_PATTERN) into its integer value, handling
-        hex (0x...), suffix-hex (...h), binary (0b... or ...b), octal (0... , ...o, ...q), and decimal forms.
-
-        :param literal: Numeric literal token
-        :type literal: str
-        :return: The integer value of the literal
-        :rtype: int
-        :raises ValueError: If the literal doesn't match any recognized numeric format
+        Converts a numeric literal token into its integer value.
         """
         if re.fullmatch(r'0[xX][\da-fA-F]+', literal):
             return int(literal, 16)
@@ -382,41 +422,28 @@ class Instruction_Parser:
         raise ValueError(f"Program parsing ran into a problem! Unrecognized numeric literal: '{literal}'")
 
     # ----------------------------
-    # General validation methods
+    # General Validation Methods
     # ----------------------------
-    
+
     def validate_instruction_line(self, line: list[str]) -> bool:
         """
-        Validates the operands of the current instruction based on the number of operands provided in the line.\n
-        Primary syntax validator
-
-        :param line: List of strings representing the instruction line
-        :type line: list[str]
-        :return: True if the instruction is format is valid, false otherwise
-        :rtype: bool
+        Validates the operands of the current instruction line.
         """
         instruction_length: int = len(line)
 
         if instruction_length == 1:
-        # One element code line means a no explicit operand so set both to a Null value
             self.op1.clear()
             self.op2.clear()
             return True
-            
         elif instruction_length > 5:
-            # instructions with more than 5 elements means it is most definitely wrong syntax
             self.op1.clear()
             self.op2.clear()
             return False
-        
         else:
             try:
                 return self.match_instruction_format(line[1:]) == self.expected_op_count
             except SyntaxError:
                 return False
-
-              
-
 
     # --------------------------
     # Pattern Matching Methods
@@ -424,109 +451,49 @@ class Instruction_Parser:
 
     def match_instruction_format(self, instruction: list[str]) -> int:
         """
-        Checks whether the operand declaration portion of an instruction (instruction removed) matches
-        one of the supported formats:\n
-        - size_dir, op1
-        - op1
-        - size_dir, op1, size_dir, op2
-        - op1, op2
-        - size_dir, op1, op2
-        - op1, size_dir, op2
+        Checks whether the operand declaration matches supported 1 or 2 operand formats.
 
-        :param instruction: Line of code containing only the operand declarations (without instruction in use)
+        :param instruction: List of instruction tokens excluding the instruction in use.
         :type instruction: list[str]
-        :return: The number of operands found (1 or 2) if the tokens match a supported operand declaration format
+        :return: Number of operands matched
         :rtype: int
-        :raises SyntaxError: If the tokens don't match any supported operand declaration format
+        :raises SyntaxError: If no supported operand patterns are matched
         """
-
-        # Patterns to Match
-        size = fr'(?:{"|".join(re.escape(k) for k in PM.SIZE_DIRECTIVES.keys())})'
-        op = fr'(?:{PM.OPERAND_PATTERN})'
-        # Precompiled PM for faster comparisons
-        one_operand_pattern = re.compile(fr'^(?:{size},{op}|{op})$')
-        two_operand_pattern = re.compile(
-            fr'^(?:{size},{op},{size},{op}|{op},{op}|{size},{op},{op}|{op},{size},{op})$'
-        )
-
-        joined = ",".join(instruction)
-        if one_operand_pattern.fullmatch(joined):
-            return 1
-        if two_operand_pattern.fullmatch(joined):
+        joined_ops = ",".join(instruction)
+    
+        if TWO_OPERAND_PATTERN.match(joined_ops):
             return 2
+        if ONE_OPERAND_PATTERN.match(joined_ops):
+            return 1
         raise SyntaxError
 
     # -----------------------------
-    # Operand Attributes Fetching
+    # Operand Attribute Fetching
     # -----------------------------
-
-    @staticmethod
-    def get_operand_type(operand: str, rip: int) -> int:
-        """
-        Determines the type of the given operand expression.
-
-        :param operand: Operand expression to classify
-        :type operand: str
-        :param rip: Current instruction line number, used for error reporting
-        :type rip: int
-        :return: 0 for memory, 1 for register, 2 for immediate (numeric literal, character/string literal, or label/constant)
-        :rtype: int
-        :raises SyntaxError: If the operand doesn't match any supported operand type
-        """
-        if Instruction_Parser.is_memory(operand):
-            return 0
-        if Instruction_Parser.is_register(operand):
-            return 1
-        if Instruction_Parser.is_immediate(operand):
-            return 2
-        raise SyntaxError(f"INVALID SYNTAX FORMAT AT LINE {rip}!")
-
 
     @staticmethod
     def get_register_size(register: str, rip: int) -> int:
         """
-        Determines the size, in bytes, of the given register based on its declared name.\n
-        General-purpose:\n
-        64-bit: rax, rbx, rcx, rdx, rsp, rbp, rsi, rdi, rip, r8-r15 -> 8\n
-        32-bit: eax, ebx, ecx, edx, esp, ebp, esi, edi, eip, r8d-r15d -> 4\n
-        16-bit: ax, bx, cx, dx, sp, bp, si, di, ip, r8w-r15w -> 2\n
-        8-bit:  al/ah, bl/bh, cl/ch, dl/dh, r8b-r15b (or r8l-r15l, per this ISA's own convention) -> 1\n
-        FPU/vector:\n
-        xmm0-15 -> 16\n
-        ymm0-15 -> 32
-        :param register: Register expression to size (without a leading '%', per existing PM.*_REGISTERS_PATTERN matching)
-        :type register: str
-        :param rip: Current instruction line number, used for error reporting. Optional.
-        :type rip: int
-        :return: The register's size in bytes (1, 2, 4, 8, 16, or 32)
-        :rtype: int
-        :raises SyntaxError: If the register name doesn't match any supported register format
+        Determines register size in bytes based on name.
         """
-        # FPU/vector registers
         if Instruction_Parser.is_fpu_register(register):
-            if register.startswith('ymm'):
-                return 32
-            return 16  # xmm
+            return 32 if register.startswith('ymm') else 16
 
         if not Instruction_Parser.is_general_purpose_register(register):
             location = f" AT LINE {rip}" if rip is not None else ""
             raise SyntaxError(f"INVALID SYNTAX FORMAT{location}!")
 
-        # 8-bit high/low byte registers: al, ah, bl, bh, cl, ch, dl, dh
         if re.fullmatch(r'[abcd][hl]', register):
             return 1
 
-        # r8-r15 extended registers with explicit size suffix
         match = re.fullmatch(r'r(?:[89]|1[0-5])([bdlw]?)', register)
         if match:
             suffix = match.group(1)
             return {"": 8, "b": 1, "l": 1, "w": 2, "d": 4}[suffix]
 
-        # rip is 8 bytes, eip is 4 bytes, ip is 2 bytes (no byte-sized ip variant exists)
         if register in ("rip", "eip", "ip"):
             return {"rip": 8, "eip": 4, "ip": 2}[register]
 
-        # Standard [er]?xx / [er]?p / [er]?i forms: rax/eax/ax, rsp/esp/sp, rsi/esi/si, etc.
         if register.startswith('r'):
             return 8
         if register.startswith('e'):
@@ -536,121 +503,60 @@ class Instruction_Parser:
     # -----------------
     # Type Validation
     # -----------------
-    
-    # -- / Memory / --
+
     @staticmethod
     def is_memory(operand: str) -> bool:
-        """
-        Checks whether the given operand expression is a memory addressing declaration (direct, base, or indexed).
-
-        :param operand: Operand expression to check
-        :type operand: str
-        :return: True if operand matches a supported memory addressing format, False otherwise
-        :rtype: bool
-        """
         return bool(re.fullmatch(PM.MEMORY_ADDRESSING_PATTERN, operand))
 
     @staticmethod
-    def is_direct_memory(operand: str) -> bool:
-        """
-        Checks whether the given operand expression is a direct or base memory addressing declaration.
-
-        :param operand: Operand expression to check
-        :type operand: str
-        :return: True if operand matches the direct/base addressing format, False otherwise
-        :rtype: bool
-        """
-        return bool(re.fullmatch(PM.DIRECT_AND_BASE_ADDRESSING_PATTERN, operand))
-
-    @staticmethod
-    def is_indexed_memory(operand: str) -> bool:
-        """
-        Checks whether the given operand expression is an indexed memory addressing declaration.
-
-        :param operand: Operand expression to check
-        :type operand: str
-        :return: True if operand matches the indexed addressing format, False otherwise
-        :rtype: bool
-        """
-        return bool(re.fullmatch(PM.INDEXED_ADDRESSING_PATTERN, operand))
-
-
-    # -- / Immediate / --
-    @staticmethod
-    def is_immediate(operand: str) -> bool:
-        """
-        Checks whether the given operand expression is an immediate-class operand: a numeric/character literal,
-        or a constant/label reference (both resolve to a value known at assemble/link time rather than at runtime
-        from a register or memory location).
-
-        :param operand: Operand expression to check
-        :type operand: str
-        :return: True if operand matches either the numeric literal format or the label/constant format
-        :rtype: bool
-        """
-        return Instruction_Parser.is_number(operand) or Instruction_Parser.is_label(operand)
-
-    @staticmethod
     def is_number(operand: str) -> bool:
-        """
-        Checks whether the given operand expression is a numeric literal (any supported base/representation)
-        or a quoted character/string literal.
-
-        :param operand: Operand expression to check
-        :type operand: str
-        :return: True if operand matches the numeric/character literal format, False otherwise
-        :rtype: bool
-        """
         return bool(re.fullmatch(PM.IMMEDIATE_VALUE_PATTERN, operand))
 
     @staticmethod
     def is_label(operand: str) -> bool:
-        """
-        Checks whether the given operand expression is a constant/label reference (bare identifier, not a numeric
-        literal or quoted string).
-
-        :param operand: Operand expression to check
-        :type operand: str
-        :return: True if operand matches the constant/label naming format, False otherwise
-        :rtype: bool
-        """
         return bool(re.fullmatch(PM.CONSTANTS_AND_LABELS_PATTERN, operand))
 
-
-    # -- / Register / --
     @staticmethod
     def is_register(operand: str) -> bool:
-        """
-        Checks whether the given operand expression is a register of any supported kind (general-purpose or FPU).
-
-        :param operand: Operand expression to check
-        :type operand: str
-        :return: True if operand matches any supported register format, False otherwise
-        :rtype: bool
-        """
         return Instruction_Parser.is_general_purpose_register(operand) or Instruction_Parser.is_fpu_register(operand)
 
     @staticmethod
     def is_general_purpose_register(operand: str) -> bool:
-        """
-        Checks whether the given operand expression is a general-purpose register (8/16/32/64-bit, including
-        high/low byte registers and r8-r15 extended registers).
-
-        :param operand: Operand expression to check
-        :type operand: str
-        :return: True if operand matches the general-purpose register format, False otherwise
-        :rtype: bool
-        """
         return bool(re.fullmatch(PM.GENERAL_PURPOSE_REGISTERS_PATTERN, operand))
 
     @staticmethod
     def is_fpu_register(operand: str) -> bool:
-        """
-        Checks whether the given operand expression is an FPU/vector register (xmm0-15 or ymm0-15).
-
-        :param operand: Operand expression to check
-        :type operand: str
-        :return: True if operand matches the FPU/vector register format, False otherwise
-        :rtype: bool
-        """
         return bool(re.fullmatch(PM.FPU_REGISTERS_PATTERN, operand))
+
+    # --------------------------------------------------
+    # Unused / Utility Helpers (Might be useful later)
+    # --------------------------------------------------
+
+    # @staticmethod
+    # def get_operand_type(operand: str, rip: int) -> int:
+    #     """
+    #     Determines operand type (0=Memory, 1=Register, 2=Immediate).
+    #     Unused in parse pipeline: solve_operands checks types directly.
+    #     """
+    #     if Instruction_Parser.is_memory(operand):
+    #         return 0
+    #     if Instruction_Parser.is_register(operand):
+    #         return 1
+    #     if Instruction_Parser.is_immediate(operand):
+    #         return 2
+    #     raise SyntaxError(f"INVALID SYNTAX FORMAT AT LINE {rip}!")
+
+    # @staticmethod
+    # def is_immediate(operand: str) -> bool:
+    #     """Checks if operand is a numeric literal or constant/label."""
+    #     return Instruction_Parser.is_number(operand) or Instruction_Parser.is_label(operand)
+
+    # @staticmethod
+    # def is_direct_memory(operand: str) -> bool:
+    #     """Checks for direct/base memory addressing format."""
+    #     return bool(re.fullmatch(PM.DIRECT_AND_BASE_ADDRESSING_PATTERN, operand))
+
+    # @staticmethod
+    # def is_indexed_memory(operand: str) -> bool:
+    #     """Checks for indexed memory addressing format."""
+    #     return bool(re.fullmatch(PM.INDEXED_ADDRESSING_PATTERN, operand))

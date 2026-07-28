@@ -284,6 +284,7 @@ The application returns the following exit codes to indicate success or specific
 | **4** | `UNOPENABLE_FILE` | Unsuccessful exit because the target file could not be opened or read. |
 | **5** | `STACK_OVERFLOW` | Unsuccessful exit due to a detected stack overflow (stack exceeds its allowed size). |
 | **10** | `INVALID_INSTRUCTION_SYNTAX` | Unsuccessful exit due to a syntax error in an instruction during parsing. |
+| **11** | `RESERVED_KEYWORD_VIOLATION` | Unsuccessful exit due to conflict in label declaration with a reserved keyword |
 | **109101** | `SOFTWARE_ERROR` | Unsuccessful exit due to an internal software bug (ASCII representation of "me"). |
 
 ---
