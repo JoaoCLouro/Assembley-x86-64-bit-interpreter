@@ -128,9 +128,11 @@ class Control_Unit:
             try:
                 self.instruction_parser.parse()
             except SyntaxError as e:
-                ...
+                print(e)
+                sys.exit(ExitCode.INVALID_INSTRUCTION_SYNTAX)
             except ValueError as e:
-                ...
+                print(e)
+                sys.exit(ExitCode.INVALID_INSTRUCTION_SYNTAX)
 
             # Verifies if the number of operands registered are compatible with the instructions documentation in the valid_instructions json file    
             if self.valid_operand_count():
@@ -156,9 +158,9 @@ class Control_Unit:
         if self.current_fu == "cpu":
             self.syscall()
         else:
+            current_fu: FU = self.get_current_fu()
             if self.current_fu == "data_path" and instruction == "call":
                 current_fu.load_rip(self.rip)   # type: ignore
-            current_fu: FU = self.get_current_fu()
             current_fu.load_values(instruction, self.op1, self.op2)
             try:
                 ret = current_fu.execute()      # type: ignore ONLY FOR JUMPS, CALL'S AND RET
@@ -183,7 +185,7 @@ class Control_Unit:
         :rtype: bool
         """
 
-        if instruction == "syscall" or instruction == "call":
+        if instruction == "syscall":
             self.current_fu = "cpu"
             return True
         
@@ -201,7 +203,8 @@ class Control_Unit:
         :return: Functional unit object at use
         :rtype: FU (Type Alias for all functional unit types)
         """
-        if self.current_fu == "cpu":
+        # 'cpu' is safely ignored as at this point it would already be taken care of 
+        if self.current_fu == "data_path":
             return self.data_path
         elif self.current_fu == "alu":
             return self.alu
