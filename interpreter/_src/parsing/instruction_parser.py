@@ -96,57 +96,58 @@ class Instruction_Parser:
         operand_info: list[str] = self.get_operand_info(line) 
 
     def get_operand_info(self, line: list[str]) -> list[str]:
-            """
-            Dynamically parses the operand declarations of an instruction.\n
-            Tries to match size key words and skips over the expected operand, if it finds one else raises an exception. Also tries to match unspecified sized operands and tries to get their size (if register).
-            If doesn't match either a size keyword or an operand format raises a SyntaxError.\n
-            Returns pairs of sizes and operand expressions used in the declaration as list elements (always 4 elements but the sizes could be '""')
+        """
+        Dynamically parses the operand declarations of an instruction.\n
+        Tries to match size key words and skips over the expected operand, if it finds one else raises an exception. Also tries to match unspecified sized operands and tries to get their size (if register).
+        If doesn't match either a size keyword or an operand format raises a SyntaxError.\n
+        Returns pairs of sizes and operand expressions used in the declaration as list elements (always 4 elements but the sizes could be '""')
             
-            :param line: Line of code in which the operands are declared without the instruction previously removed
-            :type line: list[str]
-            :return: List os size and operand expression pairs always following the format: [size;op2;size;op1]
-            :rtype: list[str]
-            :raises SyntaxError: If comes across an invalid syntax format for assembly x86-64bit code
-            :raises ValueError: If comes across a software bug (Unexpected but preventive)
-            """
-            ret_list: list[str] = ["", "", "", ""]
-            max_ret_value: int = 3 
-            last_idx: int = len(line) - 1
-            size_directives = PM.SIZE_DIRECTIVES
-            operand_re = re.compile(fr'^({PM.OPERAND_PATTERN})$')
+        :param line: Line of code in which the operands are declared without the instruction previously removed
+        :type line: list[str]
+        :return: List os size and operand expression pairs always following the format: [size;op2;size;op1]
+        :rtype: list[str]
+        :raises SyntaxError: If comes across an invalid syntax format for assembly x86-64bit code
+        :raises ValueError: If comes across a software bug (Unexpected but preventive)
+        """
+        ret_list: list[str] = ["", "", "", ""]
+        max_ret_value: int = 3 
+        last_idx: int = len(line) - 1
+        size_directives = PM.SIZE_DIRECTIVES
+        operand_re = re.compile(fr'^({PM.OPERAND_PATTERN})$')
     
-            i = 0
-            while i < len(line):
-                token = line[i]
-                size = size_directives.get(token)
+        i = 0
+        while i < len(line):
+            token = line[i]
+            size = size_directives.get(token)
     
-                if size is not None:
-                    if i == last_idx or not operand_re.match(line[i + 1]):
-                        raise SyntaxError(f"INVALID SYNTAX FORMAT AT LINE {self.rip}!")
-                    if max_ret_value <= 1:
-                        raise ValueError("Program parsing ran into a problem! Aborting execution ...")
-                    ret_list[max_ret_value] = line[i + 1]
-                    ret_list[max_ret_value - 1] = str(size)
-                    max_ret_value -= 2
-                    i += 2
-    
-                elif operand_re.match(token):
-                    if max_ret_value <= 1:
-                        raise ValueError("Program parsing ran into a problem! Aborting execution ...")
-                    ret_list[max_ret_value] = token
-                    if self.is_register(token):
-                        try:
-                            ret_list[max_ret_value - 1] = str(self.get_register_size(token))
-                        except SyntaxError as e:
-                            print(e)
-                            sys.exit(ExitCode.INVALID_INSTRUCTION_SYNTAX)
-                    else:
-                        ret_list[max_ret_value - 1] = ""
-                    max_ret_value -= 2
-                    i += 1
-    
-                else:
+            if size is not None:
+                if i == last_idx or not operand_re.match(line[i + 1]):
+                    raise SyntaxError(f"INVALID SYNTAX FORMAT AT LINE {self.rip}!")
+                if max_ret_value <= 1:
                     raise ValueError("Program parsing ran into a problem! Aborting execution ...")
+                ret_list[max_ret_value] = line[i + 1]
+                ret_list[max_ret_value - 1] = str(size)
+                max_ret_value -= 2
+                i += 2
+    
+            elif operand_re.match(token):
+                if max_ret_value <= 1:
+                    raise ValueError("Program parsing ran into a problem! Aborting execution ...")
+                ret_list[max_ret_value] = token
+                if self.is_register(token):
+                    try:
+                        ret_list[max_ret_value - 1] = str(self.get_register_size(token, self.rip))
+                    except SyntaxError as e:
+                        print(e)
+                        sys.exit(ExitCode.INVALID_INSTRUCTION_SYNTAX)
+                else:
+                    ret_list[max_ret_value - 1] = ""
+                max_ret_value -= 2
+                i += 1
+    
+            else:
+                raise ValueError("Program parsing ran into a problem! Aborting execution ...")
+        return ret_list
 
         
 
@@ -225,9 +226,9 @@ class Instruction_Parser:
             return 2
         raise SyntaxError
 
-    # -----------------------
-    # Operand Type Fetching
-    # -----------------------
+    # -----------------------------
+    # Operand Attributes Fetching
+    # -----------------------------
 
     @staticmethod
     def get_operand_type(operand: str, rip: int) -> int:
@@ -249,6 +250,58 @@ class Instruction_Parser:
         if Instruction_Parser.is_immediate(operand):
             return 2
         raise SyntaxError(f"INVALID SYNTAX FORMAT AT LINE {rip}!")
+
+
+    @staticmethod
+    def get_register_size(register: str, rip: int) -> int:
+        """
+        Determines the size, in bytes, of the given register based on its declared name.\n
+        General-purpose:\n
+        64-bit: rax, rbx, rcx, rdx, rsp, rbp, rsi, rdi, rip, r8-r15 -> 8\n
+        32-bit: eax, ebx, ecx, edx, esp, ebp, esi, edi, eip, r8d-r15d -> 4\n
+        16-bit: ax, bx, cx, dx, sp, bp, si, di, ip, r8w-r15w -> 2\n
+        8-bit:  al/ah, bl/bh, cl/ch, dl/dh, r8b-r15b (or r8l-r15l, per this ISA's own convention) -> 1\n
+        FPU/vector:\n
+        xmm0-15 -> 16\n
+        ymm0-15 -> 32
+        :param register: Register expression to size (without a leading '%', per existing PM.*_REGISTERS_PATTERN matching)
+        :type register: str
+        :param rip: Current instruction line number, used for error reporting. Optional.
+        :type rip: int
+        :return: The register's size in bytes (1, 2, 4, 8, 16, or 32)
+        :rtype: int
+        :raises SyntaxError: If the register name doesn't match any supported register format
+        """
+        # FPU/vector registers
+        if Instruction_Parser.is_fpu_register(register):
+            if register.startswith('ymm'):
+                return 32
+            return 16  # xmm
+
+        if not Instruction_Parser.is_general_purpose_register(register):
+            location = f" AT LINE {rip}" if rip is not None else ""
+            raise SyntaxError(f"INVALID SYNTAX FORMAT{location}!")
+
+        # 8-bit high/low byte registers: al, ah, bl, bh, cl, ch, dl, dh
+        if re.fullmatch(r'[abcd][hl]', register):
+            return 1
+
+        # r8-r15 extended registers with explicit size suffix
+        match = re.fullmatch(r'r(?:[89]|1[0-5])([bdlw]?)', register)
+        if match:
+            suffix = match.group(1)
+            return {"": 8, "b": 1, "l": 1, "w": 2, "d": 4}[suffix]
+
+        # rip is 8 bytes, eip is 4 bytes, ip is 2 bytes (no byte-sized ip variant exists)
+        if register in ("rip", "eip", "ip"):
+            return {"rip": 8, "eip": 4, "ip": 2}[register]
+
+        # Standard [er]?xx / [er]?p / [er]?i forms: rax/eax/ax, rsp/esp/sp, rsi/esi/si, etc.
+        if register.startswith('r'):
+            return 8
+        if register.startswith('e'):
+            return 4
+        return 2
 
     # -----------------
     # Type Validation
