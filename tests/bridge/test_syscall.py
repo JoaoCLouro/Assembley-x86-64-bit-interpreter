@@ -1,127 +1,384 @@
-import pytest
-import ctypes
-from unittest.mock import MagicMock, patch
+"""
+Tests for the Syscall class (control_unit-level syscall dispatcher).
 
-from interpreter._src.bridges.syscall import Syscall
+All tests bypass Syscall.__init__ via object.__new__ to avoid loading the
+real libscl.so, and use unittest.mock.Mock for registers/memory/lib so no
+real ctypes calls, real files, or real host I/O happen during the test run.
+"""
+
+import pytest
+from unittest.mock import Mock, call
+
+from  interpreter._src.bridges.syscall import Syscall
+
+
+# ---------------------------------------------------------------------------
+# Fixtures
+# ---------------------------------------------------------------------------
 
 @pytest.fixture
 def mock_registers():
-    """Provides a mocked Registers_Interface."""
-    return MagicMock()
+    """
+    A Mock standing in for Registers_Interface. Backed by a plain dict so
+    read_reg/write_reg behave consistently across a test without needing to
+    hand-configure return values for every register read.
+    """
+    regs = Mock()
+    state = {}
+
+    def read_reg(name):
+        return state.get(name, 0)
+
+    def write_reg(name, value, signed=False):
+        state[name] = value
+
+    regs.read_reg.side_effect = read_reg
+    regs.write_reg.side_effect = write_reg
+    regs._state = state  # exposed for assertions
+    return regs
+
 
 @pytest.fixture
 def mock_memory():
-    """Provides a mocked Data_Memory."""
-    return MagicMock()
+    """
+    A Mock standing in for Data_Memory. read_bytes/write_bytes are backed by
+    a dict-of-bytes so multi-call sequences (e.g. write a path string, then
+    read it back) behave consistently.
+    """
+    mem = Mock()
+    mem.RODATA_BASE = 0x500000
+    store = {}
+
+    def read_bytes(addr, size):
+        return bytes(store.get(addr + i, 0) for i in range(size))
+
+    def write_bytes(addr, data, size, create_page=True):
+        for i in range(size):
+            store[addr + i] = data[i]
+
+    mem.read_bytes.side_effect = read_bytes
+    mem.write_bytes.side_effect = write_bytes
+    mem._store = store  # exposed for assertions
+    return mem
+
 
 @pytest.fixture
-def syscall_instance(mock_registers, mock_memory):
+def syscall(mock_registers, mock_memory):
     """
-    Initializes the Syscall class with mocked dependencies.
-    We patch ctypes.CDLL to prevent it from attempting to load the actual 
-    libscl.so file during unit testing, which keeps tests isolated.
+    Builds a Syscall instance without running __init__, so no real
+    ctypes.CDLL(libscl.so) load happens. `lib` is a bare Mock; individual
+    tests configure whichever lib.sys_* methods they need.
     """
-    with patch('ctypes.CDLL') as mock_cdll:
-        instance = Syscall(mock_registers, mock_memory)
-        yield instance
+    scl = object.__new__(Syscall)
+    scl.registers = mock_registers
+    scl.memory = mock_memory
+    scl.lib = Mock()
+    return scl
 
-# --- Dispatch Tests ---
 
-def test_syscall_dispatch_exit(syscall_instance, mock_registers):
-    """Test that rax=1 dispatches to the exit handler."""
-    mock_registers.read_reg.side_effect = lambda reg: {'rax': 1, 'rdi': 0, 'rsi': 0, 'rdx': 0}.get(reg, 0)
-    
-    # Patch the method on the Syscall class, not the instance
-    with patch.object(Syscall, 'exit') as mock_exit:
-        syscall_instance.syscall()
-        mock_exit.assert_called_once()
+def set_call(regs, rax, rdi=0, rsi=0, rdx=0):
+    """Helper to load rax/rdi/rsi/rdx like control_unit would before dispatch."""
+    regs.write_reg('rax', rax)
+    regs.write_reg('rdi', rdi)
+    regs.write_reg('rsi', rsi)
+    regs.write_reg('rdx', rdx)
 
-def test_syscall_dispatch_read(syscall_instance, mock_registers):
-    """Test that rax=3 dispatches to the read handler with correct arguments."""
-    mock_registers.read_reg.side_effect = lambda reg: {'rax': 3, 'rdi': 0, 'rsi': 1024, 'rdx': 64}.get(reg, 0)
-    
-    # Patch the method on the Syscall class
-    with patch.object(Syscall, 'read') as mock_read:
-        syscall_instance.syscall()
-        mock_read.assert_called_once_with(0, 1024, 64)
 
-def test_syscall_dispatch_write(syscall_instance, mock_registers):
-    """Test that rax=4 dispatches to the write handler with correct arguments."""
-    mock_registers.read_reg.side_effect = lambda reg: {'rax': 4, 'rdi': 1, 'rsi': 2048, 'rdx': 128}.get(reg, 0)
-    
-    # Patch the method on the Syscall class
-    with patch.object(Syscall, 'write') as mock_write:
-        syscall_instance.syscall()
-        mock_write.assert_called_once_with(1, 2048, 128)
+# ---------------------------------------------------------------------------
+# syscall() dispatch
+# ---------------------------------------------------------------------------
 
-def test_syscall_dispatch_unknown(syscall_instance, mock_registers):
-    """Test that an unknown syscall code acts as a no-op."""
-    mock_registers.read_reg.side_effect = lambda reg: {'rax': 999, 'rdi': 0, 'rsi': 0, 'rdx': 0}.get(reg, 0)
-    
-    # Patch the methods on the Syscall class
-    with patch.object(Syscall, 'exit') as mock_exit, \
-         patch.object(Syscall, 'read') as mock_read, \
-         patch.object(Syscall, 'write') as mock_write:
-        
-        syscall_instance.syscall()
-        
-        mock_exit.assert_not_called()
-        mock_read.assert_not_called()
-        mock_write.assert_not_called()
+class TestDispatch:
 
-# --- Handler Tests ---
+    def test_dispatches_write_and_writes_result_to_rax(self, syscall, mock_registers):
+        syscall.lib.sys_write.return_value = 5
+        set_call(mock_registers, rax=Syscall.SYS_WRITE, rdi=1, rsi=0x1000, rdx=5)
 
-def test_exit(syscall_instance):
-    """Test that exit terminates the process using sys.exit(0)."""
-    with pytest.raises(SystemExit) as exc_info:
-        syscall_instance.exit()
-    assert exc_info.value.code == 0
+        syscall.syscall()
 
-def test_read_success(syscall_instance, mock_memory):
-    """
-    Test successful read from C lib, padding logic, and memory write.
-    """
-    fd, addr, requested_size = 0, 1024, 10
-    actual_read_size = 5
-    
-    # Configure the C lib mock on the instance.lib attribute
-    syscall_instance.lib.sys_read.return_value = actual_read_size
-    
-    result = syscall_instance.read(fd, addr, requested_size)
-    
-    assert result == actual_read_size
-    syscall_instance.lib.sys_read.assert_called_once()
-    
-    expected_data = b'\x00' * requested_size
-    mock_memory.write_bytes.assert_called_once_with(addr, expected_data, requested_size)
+        assert mock_registers.read_reg('rax') == 5
 
-def test_read_failure(syscall_instance, mock_memory):
-    """Test that a failing sys_read (-1) aborts before writing to simulated memory."""
-    fd, addr, size = 99, 1024, 10
-    
-    syscall_instance.lib.sys_read.return_value = -1
-    
-    result = syscall_instance.read(fd, addr, size)
-    
-    assert result == -1
-    mock_memory.write_bytes.assert_not_called()
+    def test_unknown_syscall_number_is_a_noop(self, syscall, mock_registers):
+        set_call(mock_registers, rax=9999)
 
-def test_write_success(syscall_instance, mock_memory):
-    """Test successful read from simulated memory and write to C lib."""
-    fd, addr, size = 1, 2048, 4
-    
-    mock_memory.read_bytes.return_value = b'Test'
-    syscall_instance.lib.sys_write.return_value = size
-    
-    result = syscall_instance.write(fd, addr, size)
-    
-    assert result == size
-    mock_memory.read_bytes.assert_called_once_with(addr, size)
-    syscall_instance.lib.sys_write.assert_called_once()
-    
-    args, _ = syscall_instance.lib.sys_write.call_args
-    assert args[0] == fd
-    assert args[2] == size
-    
-    passed_buffer = args[1]
-    assert bytes(passed_buffer[:size]) == b'Test'
+        syscall.syscall()  # must not raise
+
+        assert mock_registers.read_reg('rax') == 9999  # untouched, no handler ran
+        syscall.lib.sys_write.assert_not_called()
+        syscall.lib.sys_read.assert_not_called()
+
+    def test_exit_does_not_write_to_rax(self, syscall, mock_registers):
+        set_call(mock_registers, rax=Syscall.SYS_EXIT)
+
+        with pytest.raises(SystemExit):
+            syscall.syscall()
+
+    def test_reads_registers_before_dispatch(self, syscall, mock_registers):
+        syscall.lib.sys_write.return_value = 0
+        set_call(mock_registers, rax=Syscall.SYS_WRITE, rdi=1, rsi=0x2000, rdx=0)
+
+        syscall.syscall()
+
+        mock_registers.read_reg.assert_any_call('rax')
+        mock_registers.read_reg.assert_any_call('rdi')
+        mock_registers.read_reg.assert_any_call('rsi')
+        mock_registers.read_reg.assert_any_call('rdx')
+
+
+# ---------------------------------------------------------------------------
+# exit
+# ---------------------------------------------------------------------------
+
+class TestExit:
+
+    def test_exit_raises_system_exit_zero(self, syscall):
+        with pytest.raises(SystemExit) as exc_info:
+            syscall.exit()
+        assert exc_info.value.code == 0
+
+
+# ---------------------------------------------------------------------------
+# read
+# ---------------------------------------------------------------------------
+
+class TestRead:
+
+    def test_read_writes_bytes_into_simulated_memory(self, syscall, mock_memory):
+        data = b"hello world"
+        syscall.lib.sys_read.side_effect = lambda fd, buf, size: (
+            [buf.__setitem__(i, b) for i, b in enumerate(data)],
+            len(data)
+        )[-1]
+
+        result = syscall.read(fd=0, addr=0x1000, size=len(data))
+
+        assert result == len(data)
+        assert mock_memory.read_bytes(0x1000, len(data)) == data
+
+    def test_read_returns_negative_one_on_error(self, syscall):
+        syscall.lib.sys_read.return_value = -1
+
+        result = syscall.read(fd=99, addr=0x1000, size=10)
+
+        assert result == -1
+
+    def test_read_zero_bytes_does_not_touch_memory(self, syscall, mock_memory):
+        syscall.lib.sys_read.return_value = 0
+
+        result = syscall.read(fd=0, addr=0x1000, size=10)
+
+        assert result == 0
+        mock_memory.write_bytes.assert_not_called()
+
+    def test_read_short_count_pads_remaining_bytes_with_zero(self, syscall, mock_memory):
+        # Simulate a short read: asked for 10 bytes, only got 4
+        partial = b"abcd"
+
+        def fake_read(fd, buf, size):
+            for i, b in enumerate(partial):
+                buf[i] = b
+            return len(partial)
+
+        syscall.lib.sys_read.side_effect = fake_read
+
+        result = syscall.read(fd=0, addr=0x1000, size=10)
+
+        assert result == 4
+        written = mock_memory.read_bytes(0x1000, 10)
+        assert written == b"abcd" + b"\x00" * 6
+
+
+# ---------------------------------------------------------------------------
+# write
+# ---------------------------------------------------------------------------
+
+class TestWrite:
+
+    def test_write_reads_bytes_from_simulated_memory_and_passes_to_lib(self, syscall, mock_memory):
+        mock_memory.write_bytes(0x2000, b"payload!", 8)
+        syscall.lib.sys_write.return_value = 8
+
+        result = syscall.write(fd=1, addr=0x2000, size=8)
+
+        assert result == 8
+        syscall.lib.sys_write.assert_called_once()
+        args = syscall.lib.sys_write.call_args[0]
+        assert args[0] == 1  # fd
+        assert bytes(args[1][:8]) == b"payload!"
+        assert args[2] == 8
+
+    def test_write_returns_negative_one_on_error(self, syscall, mock_memory):
+        mock_memory.write_bytes(0x2000, b"x", 1)
+        syscall.lib.sys_write.return_value = -1
+
+        result = syscall.write(fd=99, addr=0x2000, size=1)
+
+        assert result == -1
+
+
+# ---------------------------------------------------------------------------
+# open
+# ---------------------------------------------------------------------------
+
+class TestOpen:
+
+    def test_open_reads_nul_terminated_path_from_memory(self, syscall, mock_memory):
+        path = b"/tmp/test.txt"
+        for i, b in enumerate(path + b"\x00"):
+            mock_memory.write_bytes(0x3000 + i, bytes([b]), 1)
+        syscall.lib.sys_open.return_value = 3
+
+        result = syscall.open(path_addr=0x3000, flags=0, mode=0)
+
+        assert result == 3
+        called_path = syscall.lib.sys_open.call_args[0][0]
+        assert called_path == path
+
+    def test_open_stops_at_nul_and_does_not_overrun(self, syscall, mock_memory):
+        # Deliberately put extra bytes after the NUL to prove they're ignored
+        path = b"/a/b\x00garbage_after_nul"
+        for i, b in enumerate(path):
+            mock_memory.write_bytes(0x3000 + i, bytes([b]), 1)
+        syscall.lib.sys_open.return_value = 3
+
+        syscall.open(path_addr=0x3000, flags=0, mode=0)
+
+        called_path = syscall.lib.sys_open.call_args[0][0]
+        assert called_path == b"/a/b"
+
+    def test_open_returns_negative_one_on_error(self, syscall, mock_memory):
+        mock_memory.write_bytes(0x3000, b"\x00", 1)  # empty path
+        syscall.lib.sys_open.return_value = -1
+
+        result = syscall.open(path_addr=0x3000, flags=0, mode=0)
+
+        assert result == -1
+
+    def test_open_passes_flags_and_mode_through(self, syscall, mock_memory):
+        mock_memory.write_bytes(0x3000, b"\x00", 1)
+        syscall.lib.sys_open.return_value = 3
+
+        syscall.open(path_addr=0x3000, flags=577, mode=0o644)
+
+        args = syscall.lib.sys_open.call_args[0]
+        assert args[1] == 577
+        assert args[2] == 0o644
+
+
+# ---------------------------------------------------------------------------
+# close
+# ---------------------------------------------------------------------------
+
+class TestClose:
+
+    def test_close_delegates_to_lib_and_returns_result(self, syscall):
+        syscall.lib.sys_close.return_value = 0
+
+        result = syscall.close(fd=3)
+
+        assert result == 0
+        syscall.lib.sys_close.assert_called_once_with(3)
+
+    def test_close_propagates_error_from_lib(self, syscall):
+        # e.g. closing 0/1/2 is rejected at the C layer
+        syscall.lib.sys_close.return_value = -1
+
+        result = syscall.close(fd=0)
+
+        assert result == -1
+
+
+
+# ---------------------------------------------------------------------------
+# getrandom
+# ---------------------------------------------------------------------------
+
+class TestGetrandom:
+
+    def test_getrandom_writes_random_bytes_into_simulated_memory(self, syscall, mock_memory):
+        random_bytes = b"\xde\xad\xbe\xef"
+
+        def fake_getrandom(buf, size):
+            for i, b in enumerate(random_bytes):
+                buf[i] = b
+            return len(random_bytes)
+
+        syscall.lib.sys_getrandom.side_effect = fake_getrandom
+
+        result = syscall.getrandom(addr=0x4000, size=4)
+
+        assert result == 4
+        assert mock_memory.read_bytes(0x4000, 4) == random_bytes
+
+    def test_getrandom_returns_negative_one_on_error(self, syscall):
+        syscall.lib.sys_getrandom.return_value = -1
+
+        result = syscall.getrandom(addr=0x4000, size=16)
+
+        assert result == -1
+
+    def test_getrandom_short_result_pads_remaining_bytes_with_zero(self, syscall, mock_memory):
+        partial = b"\x01\x02"
+
+        def fake_getrandom(buf, size):
+            for i, b in enumerate(partial):
+                buf[i] = b
+            return len(partial)
+
+        syscall.lib.sys_getrandom.side_effect = fake_getrandom
+
+        result = syscall.getrandom(addr=0x4000, size=8)
+
+        assert result == 2
+        written = mock_memory.read_bytes(0x4000, 8)
+        assert written == b"\x01\x02" + b"\x00" * 6
+
+    def test_getrandom_passes_exact_requested_size_to_lib(self, syscall):
+        # Guards against the size argument being silently dropped, doubled,
+        # or off-by-one'd on the way to the C layer.
+        syscall.lib.sys_getrandom.return_value = 0
+
+        syscall.getrandom(addr=0x4000, size=13)
+
+        args = syscall.lib.sys_getrandom.call_args[0]
+        assert args[1] == 13
+
+    def test_getrandom_zero_result_does_not_touch_memory(self, syscall, mock_memory):
+        syscall.lib.sys_getrandom.return_value = 0
+
+        result = syscall.getrandom(addr=0x4000, size=8)
+
+        assert result == 0
+        mock_memory.write_bytes.assert_not_called()
+
+
+# ---------------------------------------------------------------------------
+# _read_c_string
+# ---------------------------------------------------------------------------
+
+class TestReadCString:
+
+    def test_reads_up_to_nul_terminator(self, syscall, mock_memory):
+        path = b"/usr/bin/ls"
+        for i, b in enumerate(path + b"\x00"):
+            mock_memory.write_bytes(0x5000 + i, bytes([b]), 1)
+
+        result = syscall._read_c_string(0x5000)
+
+        assert result == path
+
+    def test_empty_string_at_immediate_nul(self, syscall, mock_memory):
+        mock_memory.write_bytes(0x5000, b"\x00", 1)
+
+        result = syscall._read_c_string(0x5000)
+
+        assert result == b""
+
+    def test_respects_max_len_safety_cap(self, syscall, mock_memory):
+        # No NUL anywhere in range; should stop at max_len instead of looping forever
+        for i in range(20):
+            mock_memory.write_bytes(0x5000 + i, b"A", 1)
+
+        result = syscall._read_c_string(0x5000, max_len=10)
+
+        assert result == b"A" * 10

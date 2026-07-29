@@ -160,7 +160,9 @@ class Control_Unit:
         if self.current_fu == "cpu":
             # Calls syscall decoder methods
             # cpu should always just refer to the syscall operation
-            self.syscall.syscall()
+            error_code = self.syscall.syscall()
+            if error_code == -1:
+                sys.exit(ExitCode.INVALID_SYSCALL)
         else:
             current_fu: FU = self.get_current_fu()
             if self.current_fu == "data_path" and instruction == "call":

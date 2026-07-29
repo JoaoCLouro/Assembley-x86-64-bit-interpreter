@@ -10,5 +10,6 @@ class ExitCode(IntEnum):
     STACK_OVERFLOW = 5
     INVALID_INSTRUCTION_SYNTAX = 10
     RESERVED_KEYWORD_VIOLATION = 11
+    INVALID_SYSCALL = 12
     SOFTWARE_ERROR = 109101
     # To be continued later

@@ -124,4 +124,174 @@ The simulator halts and emits standardized status codes upon completion or error
 | **5** | `STACK_OVERFLOW` | Unsuccessful exit due to a detected stack overflow (stack exceeds its allowed size). |
 | **10** | `INVALID_INSTRUCTION_SYNTAX` | Unsuccessful exit due to a syntax error in an instruction during parsing. |
 | **11** | `RESERVED_KEYWORD_VIOLATION` | Unsuccessful exit due to conflict in label declaration with a reserved keyword |
+| **12** | `INVALID_SYSCALL` | Unsuccessful exit due to an unsupported syscall or incorrect syscall |
 | **109101** | `SOFTWARE_ERROR` | Unsuccessful exit due to an internal software bug (ASCII representation of "me"). |
+
+---
+
+## 7. System Calls
+
+The simulator exposes a small set of Linux x86-64-compatible system calls,
+letting simulated programs perform real I/O, allocate heap space, generate
+random data, and terminate — without the simulator needing to implement a
+full kernel.
+
+A syscall is invoked the same way it is on real x86-64 Linux: the syscall
+number is placed in `rax`, up to three arguments are placed in `rdi`, `rsi`,
+and `rdx`, and a `syscall` instruction transfers control. The control unit
+intercepts this instruction and hands execution to the `Syscall` class rather
+than emulating a real `syscall` trap.
+
+Syscall numbers match the real x86-64 Linux ABI (as defined in
+`arch/x86/entry/syscalls/syscall_64.tbl`) wherever an equivalent syscall is
+supported. This means assembly written against standard Linux syscall
+conventions runs unmodified — the numbers are not simulator-specific.
+
+### Architecture
+
+Syscall handling is split across two layers, mirroring the rest of the
+simulator's Python/C split:
+
+```
+control_unit
+     |
+     v
+Syscall.syscall()  (Python)
+     |
+     |  reads rax/rdi/rsi/rdx via Registers_Interface
+     |  dispatches to the matching handler method
+     |  translates simulated addresses <-> real bytes via Data_Memory
+     v
+libscl.so  (C, via ctypes)
+     |
+     |  performs the actual host operation
+     |  (real file I/O, real CSPRNG, real fd management)
+     v
+Host OS
+```
+
+**The C layer knows nothing about simulated memory, virtual addresses, or
+paging.** Every C function operates purely on plain host byte buffers and
+real file descriptors. All translation between a simulated memory address
+and an actual buffer of bytes happens on the Python side, via the
+`Data_Memory` bridge (`read_bytes`/`write_bytes`). This keeps the C module a
+thin, testable I/O layer, and keeps all knowledge of the simulator's own
+address space in one place.
+
+### File descriptors
+
+Three file descriptors are always available and behave like their real
+counterparts:
+
+| fd | Stream |
+|----|--------|
+| 0  | stdin  |
+| 1  | stdout |
+| 2  | stderr |
+
+Any other file descriptor must first be obtained via `open` (see below). The
+simulator does not maintain its own fd table — descriptors returned by
+`open` are real host file descriptors, used as-is in subsequent
+`read`/`write`/`close` calls.
+
+`close` refuses to operate on fd 0/1/2; the simulator treats the standard
+streams as always-open for the lifetime of the process.
+
+## Supported syscalls
+
+### `read` (0)
+
+Reads bytes from a file descriptor into simulated memory.
+
+| Register | Meaning |
+|----------|---------|
+| `rdi`    | File descriptor (0/1/2, or a real fd from `open`) |
+| `rsi`    | Simulated memory address to write the bytes into |
+| `rdx`    | Number of bytes to read |
+| `rax` (return) | Number of bytes actually read, or `-1` on error |
+
+Bytes are read from the real file descriptor into a host buffer, then
+copied into simulated memory at the given address via `Data_Memory.write_bytes`.
+A short read (fewer bytes available than requested, e.g. near end-of-file)
+still succeeds; only the bytes actually read are meaningful, and the
+remainder of the requested region is zero-padded.
+
+### `write` (1)
+
+Writes bytes from simulated memory to a file descriptor.
+
+| Register | Meaning |
+|----------|---------|
+| `rdi`    | File descriptor (0/1/2, or a real fd from `open`) |
+| `rsi`    | Simulated memory address to read the bytes from |
+| `rdx`    | Number of bytes to write |
+| `rax` (return) | Number of bytes actually written, or `-1` on error |
+
+Bytes are read out of simulated memory via `Data_Memory.read_bytes`, then
+written to the real file descriptor.
+
+### `open` (2)
+
+Opens a real host file, given a path stored in simulated memory.
+
+| Register | Meaning |
+|----------|---------|
+| `rdi`    | Simulated memory address of a NUL-terminated path string |
+| `rsi`    | Real `O_*` flags (`O_RDONLY`, `O_WRONLY`, `O_RDWR`, `O_CREAT`, `O_TRUNC`, `O_APPEND`, ...) |
+| `rdx`    | Permission bits, used only when `O_CREAT` is set (e.g. `0644`) |
+| `rax` (return) | A real file descriptor (`>= 0`) on success, or `-1` on error |
+
+The path is read one byte at a time from simulated memory starting at the
+given address, stopping at the first NUL byte (capped at 4096 bytes as a
+safety limit against a missing terminator). The resulting real fd is
+returned directly in `rax` and can be used with `read`, `write`, and `close`
+exactly like any other fd.
+
+### `close` (3)
+
+Closes a real host file descriptor previously returned by `open`.
+
+| Register | Meaning |
+|----------|---------|
+| `rdi`    | File descriptor to close |
+| `rax` (return) | `0` on success, or `-1` on error |
+
+Attempting to close fd 0, 1, or 2 always fails (`-1`) — the standard streams
+are protected and cannot be closed through this syscall.
+
+### `getrandom` (318)
+
+Fills simulated memory with random bytes sourced from the host's
+cryptographically secure random number generator.
+
+| Register | Meaning |
+|----------|---------|
+| `rdi`    | Simulated memory address to write random bytes into |
+| `rsi`    | Number of random bytes requested |
+| `rax` (return) | Number of random bytes actually written, or `-1` on error |
+
+Uses the real `getrandom(2)` syscall on Linux hosts, falling back to reading
+`/dev/urandom` if unavailable. As with `read`, a short result is zero-padded
+to the requested size; only the actually-written bytes are meaningful.
+
+### `exit` (60)
+
+Terminates the simulator process immediately.
+
+| Register | Meaning |
+|----------|---------|
+| (none)   | No arguments are read |
+
+Calling this syscall ends the Python process itself via `sys.exit(0)` — it
+does not merely halt the simulated program's execution loop. If the control
+unit needs to keep running afterward (for example, inside a test harness
+processing multiple programs in one session), this is the one syscall that
+cannot currently be "recovered" from; the whole host process ends.
+
+## Error convention
+
+Every syscall that returns a value follows the same convention as real
+x86-64 Linux: success returns a non-negative value in `rax` (meaning depends
+on the syscall — a byte count, a file descriptor, an address), and failure
+returns `-1`. There is currently no `errno`-equivalent detail available
+beyond this single sentinel value.
