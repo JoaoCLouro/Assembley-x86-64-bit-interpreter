@@ -18,6 +18,7 @@ TEST_BIN_DIR = tests/bin
 LIB_OPS  = $(LIB_DIR)/liboperations.so
 LIB_MMU  = $(LIB_DIR)/libmmu.so
 LIB_REG  = $(LIB_DIR)/libreg.so
+LIB_SYS  = $(LIB_DIR)/librscl.so
 
 SHARED_LIBS = $(LIB_OPS) $(LIB_MMU) $(LIB_REG)
 
@@ -51,6 +52,9 @@ $(LIB_MMU): $(BUILD_DIR)/memory_eng.o
 	$(CC) $(LDFLAGS) -o $@ $<
 
 $(LIB_REG): $(BUILD_DIR)/registers.o
+	$(CC) $(LDFLAGS) -o $@ $<
+
+$(LIB_SYS): $(BUILD_DIR)/syscall.o
 	$(CC) $(LDFLAGS) -o $@ $<
 
 # Rule to compile AND link test executables against the custom libraries
