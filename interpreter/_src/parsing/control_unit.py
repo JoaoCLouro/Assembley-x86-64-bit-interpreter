@@ -2,6 +2,7 @@ import sys
 from ..helpers.my_types import DataSectionInfo, BssSectionInfo, LabelMap, ConstantMap, FU
 
 from ..bridges.data_memory import Data_Memory
+from ..bridges.syscall import Syscall
 
 from .patter_matching_helpers import INSTRUCTIONS
 from .segment_mapper import Segment_Mapper
@@ -24,7 +25,7 @@ class Control_Unit:
         # TO DO
     """
 
-    __slots__ = ["registers", "memory", "data_path", "alu", "fpu", "rip", 
+    __slots__ = ["registers", "memory", "data_path", "alu", "fpu", "syscall", "rip", 
                  "text_section", "rodata_section", "data_section", "bss_section", "labels", "constants", 
                  "finished", 
                  "current_fu", "current_instruction", "op1", "op2", "instruction_parser"]
@@ -34,6 +35,7 @@ class Control_Unit:
         self.registers = loader.registers
         self.memory: Data_Memory = loader.memory
         self.data_path: Data_Path = Data_Path(self.registers, self.memory, loader.labels)
+        self.syscall: Syscall = Syscall(self.registers, self.memory)
         self.alu: ALU = ALU(self.registers, self.memory)
         self.fpu: FPU = FPU(self.registers, self.memory)
 
@@ -156,7 +158,9 @@ class Control_Unit:
         
         """
         if self.current_fu == "cpu":
-            self.syscall()
+            # Calls syscall decoder methods
+            # cpu should always just refer to the syscall operation
+            self.syscall.syscall()
         else:
             current_fu: FU = self.get_current_fu()
             if self.current_fu == "data_path" and instruction == "call":
@@ -220,29 +224,7 @@ class Control_Unit:
         :return: True if the current operand count is valid for the current instruction
         :rtype: bool
         """
-        return INSTRUCTIONS[self.current_fu][self.current_instruction] == (self.op1.is_valid() + self.op2.is_valid())
-        
-    
-    # -------------------------------
-    # SYSCALL'S METHODS (TO BE TRANSFORMED INTO A CLASS)
-    # -------------------------------
-
-    def syscall(self) -> None:
-        """
-        TO CREATE A COSTUME SYSCALL HANDLER OBJ
-        """
-        rax: int = self.registers.read_reg("rax")
-        rdi: int = self.registers.read_reg("rdi")
-        rdx: int = self.registers.read_reg("rdx")
-        rsi: int = self.registers.read_reg("rsi")
-        # Exit syscall
-        if rax == 60:
-            print(f"Program finished with exit status {rdi}")
-            sys.exit(0)
-        # Write syscall (could be improved to allow writing into the stdin)
-        elif rax == 1 and rdi == 1:
-            for i in range(rdx):
-                print(Data_Memory.read_bytes(self.memory, rsi + i, 1).decode('utf-8'))
+        return INSTRUCTIONS[self.current_fu][self.current_instruction] == (self.op1.is_valid() + self.op2.is_valid())     
 
 
     # -------------------------

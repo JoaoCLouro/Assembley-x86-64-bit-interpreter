@@ -20,10 +20,12 @@ LIB_MMU  = $(LIB_DIR)/libmmu.so
 LIB_REG  = $(LIB_DIR)/libreg.so
 LIB_SYS  = $(LIB_DIR)/librscl.so
 
-SHARED_LIBS = $(LIB_OPS) $(LIB_MMU) $(LIB_REG)
+# FIX 1: Added $(LIB_SYS) here so the library is built as a dependency
+SHARED_LIBS = $(LIB_OPS) $(LIB_MMU) $(LIB_REG) $(LIB_SYS)
 
-# 2. Define the linker flags for the tests (matches the names above)
-TEST_LIBS = -loperations -lmmu -lreg
+# 2. Define the linker flags for the tests
+# FIX 2: Added -lrscl here so the tests link against librscl.so
+TEST_LIBS = -loperations -lmmu -lreg -lrscl
 
 # 3. Test files and binaries
 TEST_SRCS = $(wildcard $(TEST_DIR)/*.c)

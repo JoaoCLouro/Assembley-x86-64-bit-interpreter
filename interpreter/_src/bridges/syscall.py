@@ -1,8 +1,8 @@
 import ctypes
 import os
 
-from ..bridges.register_manager import Registers_Interface
-from ..bridges.data_memory import Data_Memory
+from .register_manager import Registers_Interface
+from .data_memory import Data_Memory
 
 
 class Syscall:
