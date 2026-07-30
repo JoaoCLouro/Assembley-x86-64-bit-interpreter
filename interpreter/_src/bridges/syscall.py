@@ -129,11 +129,11 @@ class Syscall:
             return result
         return 0
 
-    def exit(self) -> None:
+    def exit(self) -> int:
         """
-        Terminates the simulator process immediately.
+        Signals the termination of the simulator process.
         """
-        sys.exit(0)
+        return 1
 
     def read(self, fd: int, addr: int, size: int) -> int:
         """

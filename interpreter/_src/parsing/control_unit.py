@@ -67,10 +67,9 @@ class Control_Unit:
         self.op2: Operand = Operand()
         self.instruction_parser: Instruction_Parser = Instruction_Parser(self.op1, self.op2, self.labels, self.constants, self.rodata_section, self.data_section, self.bss_section, self.registers)
 
-
-    #---------------------------------
-    # Cycle execution methods
-    #---------------------------------
+    # ------------------
+    # Callable methods
+    # ------------------
 
     def run(self) -> None:
         self.rip += 1
@@ -79,25 +78,58 @@ class Control_Unit:
             # Debugging feature: Trap flag verification. If the trap flag is raised, execute the trap flag command and halt execution before executing the instruction in the current line.
             if self.registers.read_trap_flag() == 1:
                 # Should allow for gdb command actions
-                self.execute_state_command()
+                self._execute_state_command()
             try:
-                self.step()
+                self._step()
             except Exception as e:
                 print(f"CPU Exception at line {self.rip}: {e}")
                 self.finished = True
+
+    def get_state(self, section: str) -> dict[str, int]:
+            """
+            Returns a snapshot of observable CPU/memory state as a dict of
+            name -> current value, for the given named section.\n
+            This is the return-value counterpart to print_section/
+            execute_state_command's inspection commands: same underlying reads,
+            same threaded fetch for memory sections, but handed back as data
+            instead of printed to stdout — useful for tests or any caller that
+            wants to assert on or further process the state rather than just
+            display it.
     
-    def step(self) -> None:
+            :param section: Which piece of state to fetch: 'data', 'rodata', 'bss', or 'registers'
+            :type section: str
+            :return: Mapping of variable/register name to its current signed value
+            :rtype: dict[str, int]
+            :raises ValueError: If section is not one of the recognized names
+            """
+            if section == "data":
+                return self._get_memory_section_state(self.data_section)
+            elif section == "rodata":
+                return self._get_memory_section_state(self.rodata_section)
+            elif section == "bss":
+                return self._get_memory_section_state(self.bss_section)
+            elif section == "registers":
+                return self._get_registers_state()
+            else:
+                raise ValueError(f"UNKNOWN SECTION '{section}' REQUESTED FOR get_state.")
+    
+
+    #---------------------------------
+    # Cycle execution methods
+    #---------------------------------
+    
+    def _step(self) -> None:
         try:
             # 1. Gets the instruction, operands and functional unit in use and verifies it's compatibility it the operator count of the instruction
             if self.rip < len(self.text_section):
-                self.fetch()
+                self._fetch()
             else:
                 print("NO VALID EXIT WAS VALID TO THE PROGRAM.\n Forcing program's exit...")
                 sys.exit(100)
             # current_instruction will only be 'None' if rip points to a label in .text (which should be skipped)
             if self.current_instruction != None:
                 # 2. Verifies if the instruction-operand set is valid and triggers the execution of the instruction in the respective functional unit
-                self.execute(self.current_instruction)
+                self._execute(self.current_instruction)
                 # 3. Increases rip 
             self.rip += 1
         except ValueError as e:
@@ -108,7 +140,7 @@ class Control_Unit:
     # Main Logic Implementation
     # -------------------------------
 
-    def fetch(self) -> None:
+    def _fetch(self) -> None:
         """
         Fetches the current instruction and its operands from the text section based on the instruction pointer (RIP).\n
         Sets the current instruction and current functional unit in use and validates and sets the operands and its size.
@@ -129,7 +161,7 @@ class Control_Unit:
             return 
         
         # Verifies if the line is an instruction and sets the instruction, f.u. in use and operand info needed for execution (size, type, value, address)
-        elif self.is_valid_instruction(line[0]):
+        elif self._is_valid_instruction(line[0]):
             self.current_instruction = line[0]
             self.instruction_parser.line = line
             self.instruction_parser.rip = self.rip
@@ -143,7 +175,7 @@ class Control_Unit:
                 sys.exit(ExitCode.INVALID_INSTRUCTION_SYNTAX)
 
             # Verifies if the number of operands registered are compatible with the instructions documentation in the valid_instructions json file    
-            if self.valid_operand_count():
+            if self._valid_operand_count():
                 return
             else:
                 # If incompatible reset all info to a Null value and raise an exception
@@ -156,7 +188,7 @@ class Control_Unit:
         else:
             raise ValueError(f"INVALID INSTRUCTION AT LINE {self.rip}!")
     
-    def execute(self, instruction: str) -> None:
+    def _execute(self, instruction: str) -> None:
         """
         Transfers executions to the class with the functional unit responsible for the instruction
         in the current instruction in this class's respective instance
@@ -170,7 +202,7 @@ class Control_Unit:
             if error_code == -1:
                 sys.exit(ExitCode.INVALID_SYSCALL)
         else:
-            current_fu: FU = self.get_current_fu()
+            current_fu: FU = self._get_current_fu()
             if self.current_fu == "data_path" and instruction == "call":
                 current_fu.load_rip(self.rip)   # type: ignore
             current_fu.load_values(instruction, self.op1, self.op2)
@@ -186,7 +218,7 @@ class Control_Unit:
     # Execution Helpers
     # ----------------------------------------
 
-    def is_valid_instruction(self, instruction: str) -> bool:
+    def _is_valid_instruction(self, instruction: str) -> bool:
         """
         Verifies if a given instruction is supported by the program and if so sets the current functional unit in use.\n
         Enables syscall's and function calls methods taken care by this class.
@@ -208,7 +240,7 @@ class Control_Unit:
 
         return False
 
-    def get_current_fu(self) -> FU:
+    def _get_current_fu(self) -> FU:
         """
         Returns the object to the current functional unit in use
 
@@ -225,7 +257,7 @@ class Control_Unit:
         else:
             raise ValueError("NO FUNCTIONAL UNIT FOUND.\n Exiting program...")
         
-    def valid_operand_count(self) -> bool:
+    def _valid_operand_count(self) -> bool:
         """
         Verifies if the current operand count is valid for the current instruction
 
@@ -239,7 +271,7 @@ class Control_Unit:
     # DEBUGGING METHODS
     # -------------------
 
-    def execute_state_command(self) -> None:
+    def _execute_state_command(self) -> None:
         """
         Cyclically asks for user input to execute commands to print the state of the program in execution.\n
         Commands are:\n
@@ -263,25 +295,25 @@ class Control_Unit:
                 
             elif command == "memory":
                 print("\n--//--\ndata section:\n")
-                self.print_section(self.data_section)
+                self._print_section(self.data_section)
                 print("\n--//--\nrodata section:\n")
-                self.print_section(self.rodata_section)
+                self._print_section(self.rodata_section)
                 print("\n--//--\nbss section:\n")
-                self.print_section(self.bss_section)
+                self._print_section(self.bss_section)
                 print("\n--//--\n")
             elif command == "data":
                 print("\n--//--\ndata section:\n")
-                self.print_section(self.data_section)
+                self._print_section(self.data_section)
                 print("\n--//--\n")
                 
             elif command == "rodata":
                 print("\n--//--\nrodata section:\n")
-                self.print_section(self.rodata_section)
+                self._print_section(self.rodata_section)
                 print("\n--//--\n")
             
             elif command == "bss":
                 print("\n--//--\nbss section:\n")
-                self.print_section(self.bss_section)
+                self._print_section(self.bss_section)
                 print("\n--//--\n")
                 
             elif command == "rip":
@@ -313,7 +345,7 @@ class Control_Unit:
                 print("Invalid command! Enter 'help' to see the list of commands available.")   
 
 
-    def print_section(self, section: DataSectionInfo | BssSectionInfo) -> None:
+    def _print_section(self, section: DataSectionInfo | BssSectionInfo) -> None:
         """
         Prints every allocated variable in the given program section (data,
         rodata, or bss) along with its current value, read from simulated
@@ -329,9 +361,8 @@ class Control_Unit:
             {
                 "var_name": {
                     "size": <number of bytes allocated>,
-                    "addresses": [<byte address>, ...]  # contiguous run
-                },
-                ...
+                    "addresses": [<byte address>, ...]
+                }
             }
  
         :param section: The program section to print (data_section, rodata_section, or bss_section)
@@ -340,51 +371,117 @@ class Control_Unit:
         :rtype: None
         """
         var_names: list[str] = list(section.keys())
- 
+
         if not var_names:
             print("(empty section)")
             return
- 
+
+        for name, value in self._fetch_section_values(section, var_names):
+            print(f"{name}: {value}")
+
+    # ----------------------------------------
+    # get_state / print_section helpers
+    # ----------------------------------------
+
+    def _get_memory_section_state(self, section: DataSectionInfo | BssSectionInfo) -> dict[str, int]:
+        """
+        Threaded-fetch counterpart to print_section, returning the section's
+        variable values as a dict instead of printing them.
+
+        :param section: The program section to read (data_section, rodata_section, or bss_section)
+        :type section: DataSectionInfo | BssSectionInfo
+        :return: Mapping of variable name to its current signed value
+        :rtype: dict[str, int]
+        """
+        var_names: list[str] = list(section.keys())
+
+        if not var_names:
+            return {}
+
+        return dict(self._fetch_section_values(section, var_names))
+
+    def _get_registers_state(self) -> dict[str, int]:
+        """
+        Returns every general-purpose register's current value plus the
+        individual status flags, as a single flat dict.\n
+        Register values are read via Registers_Interface.read_reg, which
+        already applies each register's current signed/unsigned
+        interpretation (2's complement correction).
+
+        :return: Mapping of register/flag name to its current value
+        :rtype: dict[str, int]
+        """
+        state: dict[str, int] = {}
+        for reg_name in Registers_Interface.REGISTERS_MAP:
+            state[reg_name] = self.registers.read_reg(reg_name)
+
+        state["ZF"] = int(self.registers.read_zero())
+        state["CF"] = int(self.registers.read_carry())
+        state["SF"] = int(self.registers.read_sign())
+        state["OF"] = int(self.registers.read_overflow())
+        state["PF"] = int(self.registers.read_parity())
+        state["TF"] = int(self.registers.read_trap_flag())
+
+        return state
+
+    def _fetch_section_values(
+        self, section: DataSectionInfo | BssSectionInfo, var_names: list[str]
+    ) -> list[tuple[str, int]]:
+        """
+        Reads every variable in var_names from simulated memory concurrently
+        across up to TOTAL_THREADS worker threads, each responsible for an
+        equal-sized chunk of the list. Results are returned in the section's
+        original order regardless of which thread finishes first.\n
+        Shared by print_section (prints the result) and
+        _get_memory_section_state (returns it as a dict).
+
+        :param section: The program section to read from
+        :type section: DataSectionInfo | BssSectionInfo
+        :param var_names: Ordered list of variable names to fetch (section.keys())
+        :type var_names: list[str]
+        :return: Ordered list of (name, signed_value) pairs, in var_names order
+        :rtype: list[tuple[str, int]]
+        """
         # One slot per variable, indexed by position in var_names. Each
         # thread only ever writes to its own disjoint slice, so no lock is
-        # needed, and the final print pass preserves the section's
-        # original order regardless of which thread finishes first.
+        # needed, and the final pass preserves the section's original
+        # order regardless of which thread finishes first.
         results: list[tuple[str, int] | None] = [None] * len(var_names)
- 
+
         # At least one thread always runs, even if TOTAL_THREADS resolved to 0
         thread_count: int = max(1, TOTAL_THREADS)
         # Never use more threads than there are variables to read.
         thread_count = min(thread_count, len(var_names))
- 
+
         chunk_size = (len(var_names) + thread_count - 1) // thread_count  # ceil division
- 
-        def fetch_elems(start: int, end: int) -> None:
+
+        def _fetch_elems(start: int, end: int) -> None:
             for i in range(start, end):
                 name = var_names[i]
                 info = section[name]
-                size: int = info["size"] # type: ignore
-                base_addr: int = info["addresses"][0] # type: ignore
- 
+                size: int = info["size"]  # type: ignore
+                base_addr: int = info["addresses"][0]  # type: ignore
+
                 data: bytes = self.memory.read_bytes(base_addr, size)
                 value: int = int.from_bytes(data, byteorder="little", signed=True)
- 
+
                 results[i] = (name, value)
- 
+
         threads: list[threading.Thread] = []
         for t in range(thread_count):
             start = t * chunk_size
             end = min(start + chunk_size, len(var_names))
             if start >= end:
                 break  # fewer variables than thread_count after ceil division
- 
-            thread = threading.Thread(target=fetch_elems, args=(start, end))
+
+            thread = threading.Thread(target=_fetch_elems, args=(start, end))
             threads.append(thread)
             thread.start()
- 
+
         for thread in threads:
             thread.join()
- 
+
         for entry in results:
             assert entry is not None  # every slot is written by exactly one thread
-            name, value = entry
-            print(f"{name}: {value}")   
+
+        return results  # type: ignore[return-value]
