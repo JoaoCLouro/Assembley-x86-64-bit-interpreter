@@ -341,3 +341,34 @@ class Registers_Interface:
 
         v: ctypes.c_uint32 = ctypes.c_uint32(value)
         self.lib.write_rflags(self.regs, v)
+
+    #----------------------
+    # String representation
+    #----------------------
+
+    def __str__(self) -> str:
+        """
+        Builds a readable dump of every general-purpose register and
+        the individual status flags, for use with debugging commands\n
+        Register values are read via read_reg, which already applies each
+        register's current signed/unsigned interpretation (2's complement
+        correction) — so the displayed value matches what a program reading
+        that register would actually see.
+
+        :return: Multi-line string listing all registers and flag states
+        :rtype: str
+        """
+        lines: list[str] = ["Registers:"]
+        for reg_name in self.REGISTERS_MAP:
+            value: int = self.read_reg(reg_name)
+            lines.append(f"  {reg_name} = {value}")
+
+        lines.append("Flags:")
+        lines.append(f"  ZF (zero)     = {int(self.read_zero())}")
+        lines.append(f"  CF (carry)    = {int(self.read_carry())}")
+        lines.append(f"  SF (sign)     = {int(self.read_sign())}")
+        lines.append(f"  OF (overflow) = {int(self.read_overflow())}")
+        lines.append(f"  PF (parity)   = {int(self.read_parity())}")
+        lines.append(f"  TF (trap)     = {int(self.read_trap_flag())}")
+
+        return "\n".join(lines)

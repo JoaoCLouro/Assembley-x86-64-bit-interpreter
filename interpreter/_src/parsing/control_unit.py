@@ -1,7 +1,11 @@
+import os
 import sys
+import threading
+
 from ..helpers.my_types import DataSectionInfo, BssSectionInfo, LabelMap, ConstantMap, FU
 
 from ..bridges.data_memory import Data_Memory
+from ..bridges.register_manager import Registers_Interface
 from ..bridges.syscall import Syscall
 
 from .patter_matching_helpers import INSTRUCTIONS
@@ -14,6 +18,8 @@ from ..FUs.fpu import FPU
 
 from interpreter.exit_codes import ExitCode
 
+_count = os.cpu_count()
+TOTAL_THREADS: int = _count if _count != None else 0
 
 class Control_Unit:
     """
@@ -32,7 +38,7 @@ class Control_Unit:
 
     def __init__ (self,loader: Segment_Mapper, debugging:bool = False) -> None:
         # Initialize Control Unit with memory, segment mapper, functional units and registers (general purpose, fpu and flags)
-        self.registers = loader.registers
+        self.registers: Registers_Interface = loader.registers
         self.memory: Data_Memory = loader.memory
         self.data_path: Data_Path = Data_Path(self.registers, self.memory, loader.labels)
         self.syscall: Syscall = Syscall(self.registers, self.memory)
@@ -229,9 +235,10 @@ class Control_Unit:
         return INSTRUCTIONS[self.current_fu][self.current_instruction] == (self.op1.is_valid() + self.op2.is_valid())     
 
 
-    # -------------------------
+    # -------------------
     # DEBUGGING METHODS
-    # -------------------------
+    # -------------------
+
     def execute_state_command(self) -> None:
         """
         Cyclically asks for user input to execute commands to print the state of the program in execution.\n
@@ -252,33 +259,132 @@ class Control_Unit:
         while True: # Transform into a case switch 
             command: str = input("Enter a command to print the state of the program or 'help' to see the list of commands available: ")
             if command == "registers":
-                # self.print_registers()
-                pass
+                print(self.registers)
+                
             elif command == "memory":
-                # self.print_memory()
-                pass
+                print("\n--//--\ndata section:\n")
+                self.print_section(self.data_section)
+                print("\n--//--\nrodata section:\n")
+                self.print_section(self.rodata_section)
+                print("\n--//--\nbss section:\n")
+                self.print_section(self.bss_section)
+                print("\n--//--\n")
             elif command == "data":
-                # self.print_data_section()
-                pass
+                print("\n--//--\ndata section:\n")
+                self.print_section(self.data_section)
+                print("\n--//--\n")
+                
             elif command == "rodata":
-                # self.print_rodata_section()
-                pass
+                print("\n--//--\nrodata section:\n")
+                self.print_section(self.rodata_section)
+                print("\n--//--\n")
+            
             elif command == "bss":
-                # self.print_bss_section()
-                pass
-            elif command == "constants":
-                # self.print_constants()
-                pass
+                print("\n--//--\nbss section:\n")
+                self.print_section(self.bss_section)
+                print("\n--//--\n")
+                
             elif command == "rip":
+                print("\n--//--\n")
                 print(f"Current value of rip: {self.rip}")
+                print("\n--//--\n")
+
             elif command == "fu":
+                print("\n--//--\n")
                 print(f"Current functional unit in use: {self.current_fu}")
+                print("\n--//--\n")
+
             elif command == "help":
-                print("List of commands available:\n- 'registers': prints the state of the registers\n- 'memory': prints the state of the memory\n- 'data': prints the state of the data section\n- 'rodata': prints the state of the rodata section\n- 'bss': prints the state of the bss section\n- 'constants': prints the state of the constants declared\n- 'rip': prints the current value of the rip register\n- 'fu': prints the current functional unit in use\n- 'help': prints this list of commands available\n- 'exit': exits the program and stops execution")
+                print("\n--//--\n")
+                print("List of commands available:\n- 'registers': prints the state of the registers\n- 'memory': prints the state of the memory\n- 'data': prints the state of the data section\n- 'rodata': prints the state of the rodata section\n- 'bss': prints the state of the bss section\n- 'rip': prints the current value of the rip register\n- 'fu': prints the current functional unit in use\n- 'help': prints this list of commands available\n- 'step': steps into the next instruction in the execution\n- ' continue': continues with the normal execution exiting debug mode\n- 'exit': exits the program and stops execution")
+                print("\n--//--\n")
+
             elif command == "step":
                 return
+
+            elif command == "run":
+                self.registers.Exch_trap_flag()
+                return 
+            
             elif command == "exit":
                 print("Exiting program and stopping execution...")
                 sys.exit(0)
             else:
-                print("Invalid command! Enter 'help' to see the list of commands available.")    
+                print("Invalid command! Enter 'help' to see the list of commands available.")   
+
+
+    def print_section(self, section: DataSectionInfo | BssSectionInfo) -> None:
+        """
+        Prints every allocated variable in the given program section (data,
+        rodata, or bss) along with its current value, read from simulated
+        memory and interpreted as a signed little-endian integer.\n
+        Reads are distributed across up to TOTAL_THREADS worker threads,
+        each responsible for an equal-sized chunk of the section's variable
+        names, so large sections are fetched concurrently rather than one
+        variable at a time. Printing itself is deferred until every thread
+        has finished, so output for different variables never interleaves
+        and is always printed in the section's original declaration order.
+ 
+        Section schema, per variable:
+            {
+                "var_name": {
+                    "size": <number of bytes allocated>,
+                    "addresses": [<byte address>, ...]  # contiguous run
+                },
+                ...
+            }
+ 
+        :param section: The program section to print (data_section, rodata_section, or bss_section)
+        :type section: DataSectionInfo | BssSectionInfo
+        :return: None
+        :rtype: None
+        """
+        var_names: list[str] = list(section.keys())
+ 
+        if not var_names:
+            print("(empty section)")
+            return
+ 
+        # One slot per variable, indexed by position in var_names. Each
+        # thread only ever writes to its own disjoint slice, so no lock is
+        # needed, and the final print pass preserves the section's
+        # original order regardless of which thread finishes first.
+        results: list[tuple[str, int] | None] = [None] * len(var_names)
+ 
+        # At least one thread always runs, even if TOTAL_THREADS resolved to 0
+        thread_count: int = max(1, TOTAL_THREADS)
+        # Never use more threads than there are variables to read.
+        thread_count = min(thread_count, len(var_names))
+ 
+        chunk_size = (len(var_names) + thread_count - 1) // thread_count  # ceil division
+ 
+        def fetch_elems(start: int, end: int) -> None:
+            for i in range(start, end):
+                name = var_names[i]
+                info = section[name]
+                size: int = info["size"] # type: ignore
+                base_addr: int = info["addresses"][0] # type: ignore
+ 
+                data: bytes = self.memory.read_bytes(base_addr, size)
+                value: int = int.from_bytes(data, byteorder="little", signed=True)
+ 
+                results[i] = (name, value)
+ 
+        threads: list[threading.Thread] = []
+        for t in range(thread_count):
+            start = t * chunk_size
+            end = min(start + chunk_size, len(var_names))
+            if start >= end:
+                break  # fewer variables than thread_count after ceil division
+ 
+            thread = threading.Thread(target=fetch_elems, args=(start, end))
+            threads.append(thread)
+            thread.start()
+ 
+        for thread in threads:
+            thread.join()
+ 
+        for entry in results:
+            assert entry is not None  # every slot is written by exactly one thread
+            name, value = entry
+            print(f"{name}: {value}")   
