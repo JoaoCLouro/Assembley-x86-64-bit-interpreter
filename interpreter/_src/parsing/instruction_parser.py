@@ -1,7 +1,6 @@
 import sys
 import re
 
-from ...exit_codes import ExitCode
 from . import patter_matching_helpers as PM
 from ..helpers.my_types import LabelMap, ConstantMap, DataSectionInfo, BssSectionInfo
 from ..bridges.register_manager import Registers_Interface
