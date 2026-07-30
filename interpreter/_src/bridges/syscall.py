@@ -15,7 +15,7 @@ class Syscall:
     Handlers that move data (read/write/open/getrandom) go through the
     Data_Memory bridge to translate simulated addresses into real bytes, then
     hand those bytes to the compiled C module (libscl.so) which performs the
-    actual host operation. The C module has no notion of virtual addresses or
+    actual operation. The C module has no notion of virtual addresses or
     paging — it only ever sees plain byte buffers and real fds.\n
     Syscall numbers follow the real x86-64 Linux ABI so that assembly written
     against standard syscall conventions works unmodified.
@@ -153,6 +153,7 @@ class Syscall:
         buffer = (ctypes.c_uint8 * size)()
         read_count = self.lib.sys_read(fd, buffer, size)
 
+        # (-1) error reported
         if read_count <= 0:
             return read_count
 
@@ -227,6 +228,7 @@ class Syscall:
         buffer = (ctypes.c_uint8 * size)()
         got = self.lib.sys_getrandom(buffer, size)
 
+        # (-1) error reported
         if got <= 0:
             return got
 

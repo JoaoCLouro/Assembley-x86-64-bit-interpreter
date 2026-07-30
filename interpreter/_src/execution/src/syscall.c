@@ -11,7 +11,7 @@
 #include <sys/random.h>
 #endif
 
-// Resolves a simulated/real fd to a real host fd usable with read(2)/write(2).
+// Resolves a simulated/real fd to a real fd usable with read(2)/write(2).
 // fd 0/1/2 map straight to the standard streams. Any other value is assumed
 // to be a real fd previously handed back by sys_open, and is passed through
 // as-is (the host kernel will reject it if it's not actually open).
@@ -54,7 +54,7 @@ int64_t sys_open(const char *path, int flags, int mode)
 
 int64_t sys_close(int fd)
 {
-    // Refuse to close the standard streams through this path; the simulator
+    // Refuse to close the standard streams through this path
     // treats 0/1/2 as always-open.
     if (fd == 0 || fd == 1 || fd == 2)
     {
