@@ -67,6 +67,13 @@ class Control_Unit:
         self.op2: Operand = Operand()
         self.instruction_parser: Instruction_Parser = Instruction_Parser(self.op1, self.op2, self.labels, self.constants, self.rodata_section, self.data_section, self.bss_section, self.registers)
 
+    def __del__(self):
+        # Classes with a __del__ method implemented that dynamically allocate space on the heap
+        self.alu = None # type: ignore
+        self.fpu = None # type: ignore
+        self.registers.clean()
+        self.memory.clean()
+    
     # ------------------
     # Callable methods
     # ------------------
@@ -96,13 +103,21 @@ class Control_Unit:
             wants to assert on or further process the state rather than just
             display it.
     
-            :param section: Which piece of state to fetch: 'data', 'rodata', 'bss', or 'registers'
+            :param section: Which piece of state to fetch: 'all', 'data', 'rodata', 'bss', or 'registers'
             :type section: str
             :return: Mapping of variable/register name to its current signed value
             :rtype: dict[str, int]
             :raises ValueError: If section is not one of the recognized names
             """
-            if section == "data":
+            if section == "all":
+                data = self._get_memory_section_state(self.data_section)
+                rodata = self._get_memory_section_state(self.rodata_section)
+                bss = self._get_memory_section_state(self.bss_section)
+                registers = self._get_registers_state()
+                return Control_Unit._merge_list([rodata, data, bss, registers])
+            
+
+            elif section == "data":
                 return self._get_memory_section_state(self.data_section)
             elif section == "rodata":
                 return self._get_memory_section_state(self.rodata_section)
@@ -382,6 +397,24 @@ class Control_Unit:
     # ----------------------------------------
     # get_state / print_section helpers
     # ----------------------------------------
+    
+    @staticmethod
+    def _merge_list(list: list[dict[str, int]]) -> dict[str, int]:
+        """
+        Joins all sections passed to the list of section. Called by 'get_state' on 'all' value of section\n
+        Should return the total state of the process
+
+        :param list: List of dictionaries depicting the state of each section of the process's information
+        :type list: list[dict[str, int]]
+        :return: Complete state of the process
+        :rtype: dict{str, int}
+        """
+        merged = {}
+        for section in list:
+            if section != None:
+                merged.update(section)
+        return merged
+
 
     def _get_memory_section_state(self, section: DataSectionInfo | BssSectionInfo) -> dict[str, int]:
         """
@@ -424,9 +457,7 @@ class Control_Unit:
 
         return state
 
-    def _fetch_section_values(
-        self, section: DataSectionInfo | BssSectionInfo, var_names: list[str]
-    ) -> list[tuple[str, int]]:
+    def _fetch_section_values(self, section: DataSectionInfo | BssSectionInfo, var_names: list[str]) -> list[tuple[str, int]]:
         """
         Reads every variable in var_names from simulated memory concurrently
         across up to TOTAL_THREADS worker threads, each responsible for an
