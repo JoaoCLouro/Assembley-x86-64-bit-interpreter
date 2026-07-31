@@ -25,10 +25,43 @@ The interpreter parses `.asm` files adhering to **Intel Assembly Syntax**.
 
 Assembly programs are parsed in two phases: **Phase 1 (Mapping)** validates section structures and symbol tables; **Phase 2 (Execution)** interprets instructions sequentially.
 
+### 2.1 Section Header Syntax
+
+Sections are declared using the full NASM form, with the `section` keyword followed by the section name:
+
+```asm
+section .text
+section .data
+section .rodata
+section .bss
+```
+
+Bare section names without the `section` keyword (e.g. `.text` alone on a line) are **not** valid.
+
+### 2.2 Section Types
+
 * **`.text`**: Executable instruction section. Must contain a valid entry label (e.g., `_start:`).
 * **`.data`**: Initialized readable and writable memory variables.
 * **`.rodata`**: Initialized read-only constants.
 * **`.bss`**: Block Started by Symbol — reserved memory for uninitialized data.
+
+### 2.3 Entry Point Declaration
+
+The `.text` section must declare its entry point using `global _start`, followed by the `_start:` label itself:
+
+```asm
+section .text
+    global _start
+
+_start:
+    ; ... instructions ...
+```
+
+### 2.4 Comments and Labels
+
+Standard NASM conventions apply:
+* Comments begin with `;` and run to the end of the line.
+* Labels are declared with a trailing colon (e.g. `loop_start:`) and referenced without one (e.g. `jmp loop_start`).
 
 ---
 
@@ -68,6 +101,31 @@ array: times 5 dd 0x01
 - `dd` - Double Word
 - `dq` - Quad Word
 
+### 3.3 Data/Rodata/Bss Variable Declarations
+
+Variables are declared NASM-style, with a label, colon, size specifier, and value(s):
+
+```asm
+counter: dd 42
+flag: dd 1
+```
+
+**Multiple comma-separated numeric values** are supported on one line and are laid out contiguously in memory, one `size specifier`-wide slot per value:
+
+```asm
+array: dd 1, 2, 3, 4
+```
+
+**String literals** are supported as a value in a `db` declaration, and can be combined with additional comma-separated numeric values on the same line (e.g. to append a trailing byte like a newline):
+
+```asm
+msg: db "hi", 0x0a
+```
+
+```asm
+msg: db "hi"
+```
+
 ---
 
 ## 4. Hardware State & Data Layout
@@ -96,6 +154,12 @@ Hardware state (registers and virtual memory) is managed in C shared libraries (
     - Example: Writing integer 0x1234 (4 bytes) places byte 0x34 at the base target address, followed by 0x12, 0x00, 0x00 at higher contiguous addresses.
 * Stack: Grows downward from higher virtual addresses managed via rsp.
 
+### 4.3 State Inspection (`get_state`)
+
+`Control_Unit.get_state(section)` returns a snapshot of observable state as a flat `dict[str, int]`. Supported section values: `"data"`, `"rodata"`, `"bss"`, `"registers"`, and `"all"`.
+
+`"all"` merges every section into a single flat dictionary — variable names and register names are both top-level keys in the same dict (e.g. `state["counter"]` for a `.data` variable and `state["rax"]` for a register both appear alongside each other, not nested under section-specific sub-dicts).
+
 ---
 
 ## 5. Functional Units (FUs) & Instruction Routing
@@ -105,6 +169,60 @@ The `control_unit.py` fetches and decodes instructions, dispatching operands to 
 * ALU (`alu.py`): Arithmetic (`add`, `sub`, `inc`, `dec`), bitwise logic (`xor`, `and`, `or`), comparisons (`cmp`)
 * FPU (`fpu.py`): Floating-point calculation and register operations.
 * Data Path (`data_path.py`): Stack control (`push`, `pop`), data transfer (`mov`) and program counter manipulation (jumps, call, ret).
+
+### 5.1 Currently Supported Instructions
+
+The authoritative list lives in `INSTRUCTIONS` (`patter_matching_helpers.py`), organized by the functional unit that handles each instruction. The number in parentheses is the required operand count.
+
+**CPU (`control_unit.py`):**
+* `syscall` (0 operands) — see Section 7 for the supported syscall numbers and their semantics
+
+**Data Path (`data_path.py`):**
+* Data movement / addressing: `lea` (2), `mov` (2)
+* Stack: `push` (1), `pop` (1)
+* Subroutines: `call` (1), `ret` (0)
+* Unconditional jump: `jmp` (1)
+* Conditional jumps (1 operand each):
+  | Mnemonic(s) | Condition |
+  |---|---|
+  | `je`, `jz` | Equal / Zero (ZF == 1) |
+  | `jne`, `jnz` | Not Equal / Not Zero (ZF == 0) |
+  | `jb`, `jc`, `jnae` | Below / Carry / Not Above-or-Equal (CF == 1) |
+  | `jnb`, `jnc`, `jae` | Not Below / Not Carry / Above-or-Equal (CF == 0) |
+  | `ja`, `jnbe` | Above / Not Below-or-Equal (CF == 0 and ZF == 0) |
+  | `jbe`, `jna` | Below-or-Equal / Not Above (CF == 1 or ZF == 1) |
+  | `jl`, `jnge` | Less / Not Greater-or-Equal (SF != OF) |
+  | `jge`, `jnl` | Greater-or-Equal / Not Less (SF == OF) |
+  | `jg`, `jnle` | Greater / Not Less-or-Equal (ZF == 0 and SF == OF) |
+  | `jle`, `jng` | Less-or-Equal / Not Greater (ZF == 1 or SF != OF) |
+  | `js` | Sign / Negative (SF == 1) |
+  | `jns` | Not Sign / Positive (SF == 0) |
+  | `jo` | Overflow (OF == 1) |
+  | `jno` | Not Overflow (OF == 0) |
+  | `jp`, `jpe` | Parity / Parity Even (PF == 1) |
+  | `jnp`, `jpo` | Not Parity / Parity Odd (PF == 0) |
+
+**ALU (`alu.py`):**
+* 2-operand: `cmp`, `add`, `adc`, `sub`, `sbb`, `and`, `or`, `xor`, `xchg`
+* 1-operand: `inc`, `dec`, `not`, `neg`
+
+**FPU (`fpu.py`):**
+* No instructions currently registered (functional unit exists but is not yet wired up — see 5.2).
+
+### 5.2 Not Yet Supported
+
+* Multiplication/division: `mul`, `imul`, `div`, `idiv`
+* FPU operations (functional unit exists but no instructions are wired up yet)
+
+### 5.3 Operand Size Inference
+
+When an instruction pairs a register operand with a memory operand that has no explicit size directive (`byte`/`word`/`dword`/`qword`), the memory operand's size is inferred from the register's size:
+
+```asm
+mov rax, [exit]     ; valid: size inferred as 8 bytes (rax's width)
+```
+
+If neither operand is a register (e.g. both operands are unsized memory references), the size cannot be inferred and this is a genuine syntax error, matching standard NASM behavior, which requires an explicit size directive in that case.
 
 ---
 
