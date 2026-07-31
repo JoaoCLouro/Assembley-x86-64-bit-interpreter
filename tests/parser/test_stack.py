@@ -100,7 +100,7 @@ class TestSegmentMapperStackDeepBoundaries(unittest.TestCase):
         
         argv = ["/bin/ls", "-la"]
         
-        self.mapper.initialize_stack(
+        self.mapper._initialize_stack(
             argvcount=2, 
             argv=argv, 
             memory=self.mapper.memory, 

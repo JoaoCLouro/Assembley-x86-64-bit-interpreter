@@ -89,15 +89,15 @@ class Segment_Mapper:
         # Memory handler class instance 
         self.memory: Data_Memory = Data_Memory(self.registers, RODATA_BASE)
         
-        self.load_program(self.file_name)
-        self.load_text()
-        self.initialize_stack(argvcount, argv, self.memory, self.stack_limit)
-        self.parse_section()
+        self._load_program(self.file_name)
+        self._load_text()
+        self._initialize_stack(argvcount, argv, self.memory, self.stack_limit)
+        self._parse_section()
 
     # -----------------------
     # PROGRAM LOADING
     # -----------------------
-    def load_program(self, file_name: str) -> None:
+    def _load_program(self, file_name: str) -> None:
         """
         Loads the program into 'usable memory' and loads
         a json file with each line of relevant code properly separated
@@ -119,7 +119,7 @@ class Segment_Mapper:
         Storage.save_file(file_name, self.memory_list)
 
 
-    def parse_section(self) -> None:
+    def _parse_section(self) -> None:
         """
         Parsing loop for the .data, .rodata and .bss sections of the program.\n
         It iterates through the memory_list, identifies section declarations, and calls appropriate methods to load data or bss segments into memory.\n
@@ -144,15 +144,15 @@ class Segment_Mapper:
                         current_rip = RODATA_BASE
                     else :
                         current_rip = DATA_BASE
-                    current_rip = self.load_data(current_rip, index, section_name.lstrip("."))
+                    current_rip = self._load_data(current_rip, index, section_name.lstrip("."))
                 elif section_name.lstrip(".") == "bss":
                     current_rip = BSS_BASE
-                    current_rip = self.load_bss(current_rip, index)
+                    current_rip = self._load_bss(current_rip, index)
                 elif section_name.lstrip(".") == "text":
                     return
 
             elif (Segment_Mapper._is_constant_declaration(tokens)):
-                self.load_constant(tokens, index)
+                self._load_constant(tokens, index)
             index += 1
 
 
@@ -176,7 +176,7 @@ class Segment_Mapper:
     # ------------------------------------------
 
 
-    def load_data(self, current_rip: Address, index: int, section: str) -> Address:
+    def _load_data(self, current_rip: Address, index: int, section: str) -> Address:
         """
         Takes care of .data and .rodata components parsing as well as validation of the declarations format.
 
@@ -190,19 +190,20 @@ class Segment_Mapper:
         index += 1
         while index < len(self.memory_list) and self.memory_list[index] and self.memory_list[index][0] != "section":
             tokens: list[str] = self.memory_list[index]
-            if not self.data_format_validation(tokens, index, section):
+            formatted_tokens = Segment_Mapper._format_string(tokens)
+            if not self._data_format_validation(tokens, index, section):
                 sys.exit(ExitCode.DATA_FORMAT_ERROR)
             elif "times" in tokens:
-                current_rip = self.load_timed_data(tokens, section, current_rip)
-            elif len(tokens) > 3:
-                current_rip = self.load_multiple_data(tokens, section, current_rip)
+                current_rip = self._load_timed_data(tokens, section, current_rip)
+            elif len(tokens) > 3 or Segment_Mapper._any_string(tokens[2:]):
+                current_rip = self._load_multiple_data(formatted_tokens, section, current_rip)
             else:
-                current_rip = self.load_single_data(tokens, section, current_rip)
+                current_rip = self._load_single_data(tokens, section, current_rip)
             index += 1
             
         return current_rip
 
-    def data_format_validation(self, line: list[str], index: int, section: str) -> bool:
+    def _data_format_validation(self, line: list[str], index: int, section: str) -> bool:
         """
         Validates the format of a .data or .rodata declaration line.
 
@@ -272,7 +273,7 @@ class Segment_Mapper:
             case _:
                 return False
 
-    def load_timed_data(self, line: list[str], section: str, current_rip: Address) -> Address:
+    def _load_timed_data(self, line: list[str], section: str, current_rip: Address) -> Address:
         """
         Loads a timed data declaration into memory.
 
@@ -298,7 +299,7 @@ class Segment_Mapper:
         current_rip += size
         return current_rip
 
-    def load_multiple_data(self, line: list[str], section: str, current_rip: Address) -> Address:
+    def _load_multiple_data(self, line: list[str], section: str, current_rip: Address) -> Address:
         """
         Loads a multiple data declaration into memory.
 
@@ -321,7 +322,7 @@ class Segment_Mapper:
             current_rip += number_of_bytes
         return current_rip
     
-    def load_single_data(self, line: list[str], section: str, current_rip: Address) -> Address:
+    def _load_single_data(self, line: list[str], section: str, current_rip: Address) -> Address:
         """
         Loads a single data declaration into memory.
 
@@ -342,12 +343,52 @@ class Segment_Mapper:
         current_rip += size
         return current_rip
 
+    @staticmethod
+    def _any_string(tokens: list[str]):
+        """
+        Verifies if any element on a token list is a double quoted string (indicator of a stringed string declaration of a variable)
+        """
+        for elem in tokens:
+            _elem = elem[1:-1]
+            if _elem.startswith('\"') and _elem.endswith('\"') or _elem.startswith("\'") and _elem.endswith("\'"):
+                return True
+        return False
+                
+
+    @staticmethod
+    def _format_string(tokens: list[str]) -> list[str]:
+        """
+        Formats the elements of a token list into usable string elements. If any of them is a string that is double quoted strips the escaped outer quotes.
+
+        :param tokens: List of elements to format by the declaration conditions
+        :type tokens: List[str]
+        :returns: List of simplified elements formatted as by the conditions declared
+        :rtype: list[str]
+        """
+        formatted_tokens = []
+
+        for elem in tokens:
+            quote_char = ""
+            if elem.startswith('"') and elem.endswith('"') or elem.startswith("'") and elem.endswith("'"):
+                formatted_tokens.append(Segment_Mapper._parse_string_elem(elem))
+            else:
+                formatted_tokens.append(elem)
+        return formatted_tokens
+            
+    @staticmethod
+    def _parse_string_elem(elem: str) -> str:
+        """
+        Removes any outer escaped quotes on a string
+        """
+        return elem.lstrip("\", \'").rstrip("\", \'")
+
+
 
     # ------------------------------
     # section .bss related methods
     # ------------------------------
 
-    def load_bss(self, current_rip: Address, index: int) -> Address:
+    def _load_bss(self, current_rip: Address, index: int) -> Address:
         """
         Takes care of .bss components parsing as well as validation of the declarations format.
 
@@ -421,7 +462,7 @@ class Segment_Mapper:
     # section .text related methods
     # ------------------------------
 
-    def load_text(self) -> None:               
+    def _load_text(self) -> None:               
         """
         Takes care of .text components (methods labels and constants) parsing as well as validation of the start declaration
         
@@ -521,7 +562,7 @@ class Segment_Mapper:
         while index < len(self.memory_list):
             line: list[str] = self.memory_list[index]
             if (Segment_Mapper._is_constant_declaration(line)):
-                self.load_constant(line, index)
+                self._load_constant(line, index)
                 index += 1
                 continue
             elif len(line) == 1 and line[0].endswith(":"):
@@ -542,7 +583,7 @@ class Segment_Mapper:
     # Constant related methods
     # ------------------------
 
-    def load_constant(self, line: list[str], index: int) -> None:
+    def _load_constant(self, line: list[str], index: int) -> None:
         """
         Takes care of constant storing
         
@@ -739,7 +780,7 @@ class Segment_Mapper:
         # |_[0]
         # |_[argc] <--- stack pointer at initialize_stack return
 
-    def initialize_stack(self, argvcount: int, argv: list[str] | None, memory: Data_Memory, stack_limit: int, stack_start: int=STACK_START) -> None:
+    def _initialize_stack(self, argvcount: int, argv: list[str] | None, memory: Data_Memory, stack_limit: int, stack_start: int=STACK_START) -> None:
         """
         Initializes the stack with argc and argv values as well as argument strings.
 

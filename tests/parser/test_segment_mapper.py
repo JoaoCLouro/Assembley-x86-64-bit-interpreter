@@ -131,13 +131,13 @@ class TestSegmentMapperValidation(unittest.TestCase):
     @patch.object(Segment_Mapper, 'is_constant', return_value=False)
     def test_data_format_validation(self, mock_is_constant, mock_print):
         # Base case: Standard data declaration
-        self.assertTrue(self.mapper.data_format_validation(["msg", "db", '"Hello"'], 1, ".data"))
+        self.assertTrue(self.mapper._data_format_validation(["msg", "db", '"Hello"'], 1, ".data"))
         
         # Lines using 'times' are routed away from basic data format checking rules
-        self.assertFalse(self.mapper.data_format_validation(["arr", "times", "10", "dd", "0"], 2, ".data"))
+        self.assertFalse(self.mapper._data_format_validation(["arr", "times", "10", "dd", "0"], 2, ".data"))
 
         # Edge case: Invalid values
-        self.assertFalse(self.mapper.data_format_validation(["invalid_val", "db", "NoQuotes"], 3, ".data"))
+        self.assertFalse(self.mapper._data_format_validation(["invalid_val", "db", "NoQuotes"], 3, ".data"))
 
     @patch.object(Segment_Mapper, 'is_constant', return_value=False)
     def test_timed_data_validation(self, mock_is_constant):
@@ -229,7 +229,7 @@ class TestSegmentMapperParsingAndTokenization(unittest.TestCase):
             "valh: dq 7Ch, 0b1101, -45d"
         ]
         
-        mapper.load_program("dummy.asm")
+        mapper._load_program("dummy.asm")
         
         # Assertions updated to match actual tokenizer layout outputs
         self.assertEqual(mapper.memory_list[0], ["label", "mov", "rax", "0x1A4"])
@@ -350,7 +350,7 @@ class TestSegmentMapperStackIsolationBoundary(unittest.TestCase):
         mapper.registers = MagicMock()
         mapper.memory = MagicMock()
         
-        mapper.initialize_stack(argvcount=0, argv=None, memory=mapper.memory, stack_limit=0x1000)
+        mapper._initialize_stack(argvcount=0, argv=None, memory=mapper.memory, stack_limit=0x1000)
         
         # When argv is empty/None, memory.push is called exactly once for argc (0)
         mapper.memory.push.assert_called_once_with((0).to_bytes(8, "little"))
