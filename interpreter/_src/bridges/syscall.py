@@ -120,7 +120,7 @@ class Syscall:
             case self.SYS_GETRANDOM:
                 result = self.getrandom(rdi, rsi)
             case self.SYS_EXIT:
-                self.exit()
+                return self.exit()
             case _:
                 return -1
 

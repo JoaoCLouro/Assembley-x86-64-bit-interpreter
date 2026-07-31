@@ -216,6 +216,8 @@ class Control_Unit:
             error_code = self.syscall.syscall()
             if error_code == -1:
                 sys.exit(ExitCode.INVALID_SYSCALL)
+            elif error_code == 1:
+                self.finished = True
         else:
             current_fu: FU = self._get_current_fu()
             if self.current_fu == "data_path" and instruction == "call":
@@ -235,7 +237,7 @@ class Control_Unit:
 
     def _is_valid_instruction(self, instruction: str) -> bool:
         """
-        Verifies if a given instruction is supported by the program and if so sets the current functional unit in use.\n
+        Verifies if a given instruction is supported by the program and if so sets the current functional unit in use and the number of operands expected by the instruction parser.\n
         Enables syscall's and function calls methods taken care by this class.
 
         :param instruction: Instruction in verification
@@ -251,6 +253,7 @@ class Control_Unit:
         for functional_units in INSTRUCTIONS.keys():
             if instruction in INSTRUCTIONS[functional_units]:
                 self.current_fu = functional_units
+                self.instruction_parser.expected_op_count = INSTRUCTIONS[functional_units][instruction]
                 return True
 
         return False
@@ -316,6 +319,7 @@ class Control_Unit:
                 print("\n--//--\nbss section:\n")
                 self._print_section(self.bss_section)
                 print("\n--//--\n")
+
             elif command == "data":
                 print("\n--//--\ndata section:\n")
                 self._print_section(self.data_section)

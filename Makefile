@@ -18,14 +18,14 @@ TEST_BIN_DIR = tests/bin
 LIB_OPS  = $(LIB_DIR)/liboperations.so
 LIB_MMU  = $(LIB_DIR)/libmmu.so
 LIB_REG  = $(LIB_DIR)/libreg.so
-LIB_SYS  = $(LIB_DIR)/librscl.so
+LIB_SYS  = $(LIB_DIR)/libscl.so
 
 # FIX 1: Added $(LIB_SYS) here so the library is built as a dependency
 SHARED_LIBS = $(LIB_OPS) $(LIB_MMU) $(LIB_REG) $(LIB_SYS)
 
 # 2. Define the linker flags for the tests
 # FIX 2: Added -lrscl here so the tests link against librscl.so
-TEST_LIBS = -loperations -lmmu -lreg -lrscl
+TEST_LIBS = -loperations -lmmu -lreg -lscl
 
 # 3. Test files and binaries
 TEST_SRCS = $(wildcard $(TEST_DIR)/*.c)
@@ -46,9 +46,14 @@ directories:
 $(BUILD_DIR)/%.o: $(SRC_DIR)/%.c
 	$(CC) $(CFLAGS) -c $< -o $@
 
-# Explicit rules mapping specific .o files to your custom .so names
-$(LIB_OPS): $(BUILD_DIR)/operations.o
-	$(CC) $(LDFLAGS) -o $@ $<
+# liboperations.so calls into functions that are only declared in headers
+# but actually DEFINED in registers.c/libreg.so and memory_eng.c/libmmu.so
+# (e.g. read_carry_flag from registers, and presumably memory read/write
+# helpers from mmu) - so liboperations.so must link against BOTH at build
+# time, and needs both built first (added as prerequisites) plus an rpath
+# so the loader can find them next to it at runtime.
+$(LIB_OPS): $(BUILD_DIR)/operations.o $(LIB_REG) $(LIB_MMU)
+	$(CC) $(LDFLAGS) -o $@ $< -L$(LIB_DIR) -lreg -lmmu -Wl,-rpath,'$$ORIGIN'
 
 $(LIB_MMU): $(BUILD_DIR)/memory_eng.o
 	$(CC) $(LDFLAGS) -o $@ $<

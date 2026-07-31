@@ -304,6 +304,31 @@ class Instruction_Parser:
             else:
                 raise ValueError("Program parsing ran into a problem! Aborting execution ...")
 
+        self._infer_unsized_memory_operand()
+
+    def _infer_unsized_memory_operand(self) -> None:
+        """
+        Infers the byte size of an unsized memory operand (e.g. `[exit]`
+        with no `byte`/`word`/`dword`/`qword` prefix) from the OTHER
+        operand's size, when that other operand is a register.
+
+        Mirrors standard NASM behavior: `mov rax, [exit]` is only
+        unambiguous because `rax` is 8 bytes wide - a bare memory operand
+        with no size directive and no register on the other side is a
+        genuine syntax error (matches real assemblers requiring an
+        explicit size directive in that case), so no inference happens
+        if neither operand is a register.
+        """
+        op1, op2 = self.op1, self.op2
+
+        if op1.is_valid() and op2.is_valid():
+            # op1 is memory (type 0) with no size, op2 is a register
+            if op1.type == 0 and op1.size == 0 and op2.type == 1:
+                op1.size = op2.size
+            # op2 is memory (type 0) with no size, op1 is a register
+            elif op2.type == 0 and op2.size == 0 and op1.type == 1:
+                op2.size = op1.size
+
     def _solve_register_operand(self, operand_obj: Operand, expr: str, size: int) -> None:
         """
         Sets an Operand instance for a register operand.
@@ -356,12 +381,27 @@ class Instruction_Parser:
 
     def _solve_label_or_constant(self, name: str) -> int:
         """
-        Resolves a bare identifier to either a label's line index or a constant's literal value.
+        Resolves a bare identifier to a label's line index, a constant's
+        literal value, or a data/rodata/bss variable's base memory address.
+
+        Checked in this order: labels, constants, then data/rodata/bss
+        variables. A variable resolves to the FIRST address in its
+        'addresses' list (its base address) - not the value currently
+        stored there - since this is used to compute a memory address for
+        addressing expressions like `[exit]`, not to fetch the variable's
+        value. The actual value at that address is read separately at
+        execution time by whatever dereferences the resolved address.
         """
         if name in self.labels:
             return self.labels[name]
         if name in self.constants:
             return int(self.constants[name]["value"])
+        for section in (self.data, self.rodata, self.bss):
+            if name in section:
+                addresses = section[name]["addresses"]
+                if isinstance(addresses, int):
+                    return addresses
+                return addresses[0]
         raise SyntaxError(f"INVALID SYNTAX FORMAT AT LINE {self.rip}! Unresolved label or constant: '{name}'")
 
     def _solve_memory_operand(self, operand: str) -> int:

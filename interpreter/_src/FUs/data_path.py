@@ -189,8 +189,8 @@ class Data_Path:
         if op1.type != 1:
             raise SyntaxError("The destination operand for LEA must be a register.")
 
-        # 3. Source MUST be a memory expression (Type 2)
-        if op2.type != 2:
+        # 3. Source MUST be a memory expression (Type 0)
+        if op2.type != 0:
             raise SyntaxError("The source operand for LEA must be a memory address expression.")
 
     def validate_mov_conditions(self) -> None:
@@ -212,24 +212,24 @@ class Data_Path:
         op2_type = op2.type
 
         # 2. Destination cannot be an immediate
-        if op1_type == 3:
+        if op1_type == 2:
             raise SyntaxError("The destination operand cannot be an immediate value or constant for the MOV instruction.")
 
-        dest_is_mem = op1_type == 2
+        dest_is_mem = op1_type == 0
 
         # 3. Read-Only Memory Protection (.rodata segment validation)
         if dest_is_mem and op1.address < 0x600000:
             raise SyntaxError("The destination memory address lies in read-only memory (.rodata/.text) and cannot be written to.")
 
         # 4. Memory-to-Memory check
-        if dest_is_mem and op2_type == 2:
+        if dest_is_mem and op2_type == 0:
             raise SyntaxError("The source and destination operands cannot both be memory addresses for the MOV instruction.")
 
         op1_size = op1.size
         op2_size = op2.size
 
         # 5. Operand size mismatch check
-        if op1_size and op2_size and not op2_type == 3:
+        if op1_size and op2_size and not op2_type == 2:
             if op1_size != op2_size:
                 raise SyntaxError(
                     f"Operand size mismatch for MOV instruction: "
@@ -255,10 +255,10 @@ class Data_Path:
         if op2.is_valid():
             raise SyntaxError("Stack instructions cannot take a second operand.")
 
-        if op1.type == 3 and self.opcode != 2:
+        if op1.type == 2 and self.opcode != 2:
             raise SyntaxError("Pop instruction requires a Register or a memory operator as arguments. No other operator type are supported")
         
-        if self.opcode == 3 and op1.type == 2 and op1.address < 0x600000:
+        if self.opcode == 3 and op1.type == 0 and op1.address < 0x600000:
             raise SyntaxError("The destination memory address lies in read-only memory (.rodata/.text) and cannot be written to.")
 
     def validate_call_condition(self) -> None:
@@ -348,14 +348,14 @@ class Data_Path:
         size = op1.size
 
         # 1. Read value from source (op2)
-        if op2_type == 3:    # IMMEDIATE
+        if op2_type == 2:    # IMMEDIATE
             val = op2.address  # Immediate value is stored in the address field
         elif op2_type == 1:  # REGISTER
             try:
                 val = self.registers.read_reg(op2.expression)
             except ValueError as e:
                 raise SyntaxError from e
-        else:               # MEMORY (op2_type == 2)
+        else:               # MEMORY (op2_type == 0)
             try:
                 val = self.memory.read_bytes(op2.address, op2.size)
             except MemoryError as e:
@@ -391,14 +391,14 @@ class Data_Path:
         size = op1.size or 8
 
         # 1. Read value from source (op2)
-        if op1_type == 3:    # IMMEDIATE
+        if op1_type == 2:    # IMMEDIATE
             val = op1.address  # Immediate value is stored in the address field
         elif op1_type == 1:  # REGISTER
             try:
                 val = self.registers.read_reg(op1.expression)
             except ValueError as e:
                 raise RuntimeError(e) from e
-        else:               # MEMORY (op2_type == 2)
+        else:               # MEMORY (op1_type == 0)
             try:
                 val = self.memory.read_bytes(op1.address, op1.size)
             except MemoryError as e:
@@ -437,7 +437,7 @@ class Data_Path:
             except ValueError as e:
                 raise RuntimeError(e) from e
 
-        elif op1_type == 2: # MEMORY
+        elif op1_type == 0: # MEMORY
             try:
                 self.memory.write_bytes(op1.address, val, op1.size)
             except MemoryError as e:

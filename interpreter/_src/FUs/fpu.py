@@ -55,8 +55,8 @@ class FPU:
         
         # Prepares all needed info
         self.state = self.lib.create_operand_state()
-        self.lib.set_registers_ref(self.state, registers)
-        self.lib.set_table_ref(self.state, memory)
+        self.lib.set_registers_ref(self.state, ctypes.cast(registers.regs, ctypes.POINTER(CPURegs)))
+        self.lib.set_table_ref(self.state, ctypes.cast(memory.table, ctypes.POINTER(Table)))
     
     def __del__(self) -> None:
         # Best-effort: free the C-side struct once this ALU is collected.

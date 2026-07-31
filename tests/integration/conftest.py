@@ -38,7 +38,12 @@ PROJECT_ROOT = _find_project_root(os.path.dirname(os.path.abspath(__file__)))
 _SRC_ROOT = os.path.join(PROJECT_ROOT, "interpreter", "_src")
 _LIBREG_PATH = os.path.join(_SRC_ROOT, "lib", "libreg.so")
 _LIBMMU_PATH = os.path.join(_SRC_ROOT, "lib", "libmmu.so")
-LIBS_PRESENT = os.path.exists(_LIBREG_PATH) and os.path.exists(_LIBMMU_PATH)
+_LIBSCL_PATH = os.path.join(_SRC_ROOT, "lib", "libscl.so")
+LIBS_PRESENT = (
+    os.path.exists(_LIBREG_PATH)
+    and os.path.exists(_LIBMMU_PATH)
+    and os.path.exists(_LIBSCL_PATH)
+)
 
 ASM_DIR = Path(PROJECT_ROOT) / "tests" / "asm_files"
 RUNNER = Path(__file__).parent / "_runner.py"
