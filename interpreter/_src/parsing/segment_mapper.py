@@ -191,7 +191,12 @@ class Segment_Mapper:
         while index < len(self.memory_list) and self.memory_list[index] and self.memory_list[index][0] != "section":
             tokens: list[str] = self.memory_list[index]
             formatted_tokens = Segment_Mapper._format_string(tokens)
-            if not self._data_format_validation(tokens, index, section):
+
+            # constant validation
+            if (Segment_Mapper._is_constant_declaration(tokens)):
+                self._load_constant(tokens, index)
+
+            elif not self._data_format_validation(tokens, index, section):
                 sys.exit(ExitCode.DATA_FORMAT_ERROR)
             elif "times" in tokens:
                 current_rip = self._load_timed_data(tokens, section, current_rip)
@@ -400,6 +405,13 @@ class Segment_Mapper:
         index += 1
         while index < len(self.memory_list) and self.memory_list[index] and self.memory_list[index][0] != "section":
             tokens: list[str] = self.memory_list[index]
+
+            # constant validation
+            if (Segment_Mapper._is_constant_declaration(tokens)):
+                self._load_constant(tokens, index)
+                index += 1
+                continue
+
             if not self.bss_format_validation(tokens, index):
                 sys.exit(ExitCode.BSS_FORMAT_ERROR)
             times: int = int(tokens[2])
