@@ -144,10 +144,12 @@ class Segment_Mapper:
                         current_rip = RODATA_BASE
                     else :
                         current_rip = DATA_BASE
-                    current_rip = self._load_data(current_rip, index, section_name.lstrip("."))
+                    current_rip, index = self._load_data(current_rip, index, section_name.lstrip("."))
+                    continue  # index already points past everything _load_data consumed
                 elif section_name.lstrip(".") == "bss":
                     current_rip = BSS_BASE
-                    current_rip = self._load_bss(current_rip, index)
+                    current_rip, index = self._load_bss(current_rip, index)
+                    continue  # index already points past everything _load_bss consumed
                 elif section_name.lstrip(".") == "text":
                     return
 
@@ -176,15 +178,20 @@ class Segment_Mapper:
     # ------------------------------------------
 
 
-    def _load_data(self, current_rip: Address, index: int, section: str) -> Address:
+    def _load_data(self, current_rip: Address, index: int, section: str) -> tuple[Address, int]:
         """
         Takes care of .data and .rodata components parsing as well as validation of the declarations format.
 
         :param current_rip: pointer to the Address in use to store values in the Data_memory object
-        :param index: number of the line being parsed
+        :param index: number of the line being parsed (the 'section .data'/'section .rodata' line itself)
         :param section: name of the section being parsed ('.data' or '.rodata')
-        :return: updated pointer to the Address in use to store values in the Data_memory object after loading the section
-        :rtype: Address
+        :return: tuple of (updated Address pointer, updated line index) after loading the
+            section. The returned index points at the first line NOT consumed by this call
+            (typically the next 'section' line, or one past the end of the file) - the
+            caller should resume iterating FROM this index, not increment its own separately
+            tracked index, or already-consumed lines (including any 'equ' constants declared
+            inside this section) will be re-processed and falsely flagged as duplicates.
+        :rtype: tuple[Address, int]
         """
 
         index += 1
@@ -195,6 +202,7 @@ class Segment_Mapper:
             # constant validation
             if (Segment_Mapper._is_constant_declaration(tokens)):
                 self._load_constant(tokens, index)
+                print(f"{tokens[0]} loaded")
 
             elif not self._data_format_validation(tokens, index, section):
                 sys.exit(ExitCode.DATA_FORMAT_ERROR)
@@ -206,7 +214,7 @@ class Segment_Mapper:
                 current_rip = self._load_single_data(tokens, section, current_rip)
             index += 1
             
-        return current_rip
+        return current_rip, index
 
     def _data_format_validation(self, line: list[str], index: int, section: str) -> bool:
         """
@@ -306,9 +314,19 @@ class Segment_Mapper:
 
     def _load_multiple_data(self, line: list[str], section: str, current_rip: Address) -> Address:
         """
-        Loads a multiple data declaration into memory.
+        Loads a multiple data declaration into memory. Supports mixing
+        string literals with comma-separated numeric values on one line
+        (e.g. `msg: db "hi", 0x0a`).
 
-        :param line: full line of code that has a .data or .rodata multiple declaration
+        A string token expands into one write per CHARACTER (each 1 byte,
+        regardless of the declared size specifier - a string is always
+        byte-per-character), advancing current_rip once per character. A
+        numeric token occupies exactly one number_of_bytes-sized slot, as
+        before. Treating a whole string as a single number_of_bytes slot
+        (the previous behavior) silently truncated it to 1 byte and threw
+        off every subsequent value's address.
+
+        :param line: full line of code (already quote-stripped) that has a .data or .rodata multiple declaration
         :type line: list[str]
         :param section: name of the section being parsed ('.data' or '.rodata')
         :type section: str
@@ -318,13 +336,27 @@ class Segment_Mapper:
         :rtype: Address
         """
         number_of_bytes: int = SIZE_DIRECTIVES[line[1]][0]
-        size: int = number_of_bytes * (len(line) - 2)
+
+        # Total size must count each string CHARACTER as its own byte-slot,
+        # not each string TOKEN as a single number_of_bytes-sized slot.
+        size: int = 0
+        for value in line[2:]:
+            if Segment_Mapper._is_numeric(value):
+                size += number_of_bytes
+            else:
+                size += len(value)
+
         # Initializes the new entry on the correct section
         self._define_segment(section, line[0], size, current_rip)
 
-        for i in range(2, len(line)):
-            Segment_Mapper._write_section_to_memory(self.memory, 1, number_of_bytes, [current_rip], current_rip, value=line[i])
-            current_rip += number_of_bytes
+        for value in line[2:]:
+            if Segment_Mapper._is_numeric(value):
+                Segment_Mapper._write_section_to_memory(self.memory, 1, number_of_bytes, [current_rip], current_rip, value=value)
+                current_rip += number_of_bytes
+            else:
+                for ch in value:
+                    Segment_Mapper._write_section_to_memory(self.memory, 1, 1, [current_rip], current_rip, value=ch)
+                    current_rip += 1
         return current_rip
     
     def _load_single_data(self, line: list[str], section: str, current_rip: Address) -> Address:
@@ -393,14 +425,17 @@ class Segment_Mapper:
     # section .bss related methods
     # ------------------------------
 
-    def _load_bss(self, current_rip: Address, index: int) -> Address:
+    def _load_bss(self, current_rip: Address, index: int) -> tuple[Address, int]:
         """
         Takes care of .bss components parsing as well as validation of the declarations format.
 
         :param current_rip: pointer to the Address in use to store values in the Data_memory object
-        :param index: number of the line being parsed
-        :return: updated pointer to the Address in use to store values in the Data_memory object after loading the section
-        :rtype: Address
+        :param index: number of the line being parsed (the 'section .bss' line itself)
+        :return: tuple of (updated Address pointer, updated line index) after loading the
+            section. The returned index points at the first line NOT consumed by this call -
+            see _load_data's docstring for why the caller must resume from this index rather
+            than incrementing its own separately tracked index.
+        :rtype: tuple[Address, int]
         """
         index += 1
         while index < len(self.memory_list) and self.memory_list[index] and self.memory_list[index][0] != "section":
@@ -428,7 +463,7 @@ class Segment_Mapper:
             Segment_Mapper._write_section_to_memory(self.memory, times, number_of_bytes, addresses, current_rip)   # BSS is always uninitialized (0)
             current_rip += size
             index += 1
-        return current_rip
+        return current_rip, index
 
     def bss_format_validation(self, line: list[str], index: int) -> bool:
         """
@@ -996,7 +1031,16 @@ class Segment_Mapper:
         """
         byte_value: bytes
         try:
-            byte_value = int(value).to_bytes(specifier, "little")
+            # base=0 makes int() auto-detect 0x/0o/0b prefixes (and still
+            # parses plain decimal strings normally) - plain int(value)
+            # raises ValueError on a hex literal like "0x0a", which was
+            # silently falling through to the string-encoding fallback
+            # below and writing the literal characters '0','x','0','a'
+            # instead of the intended single byte 0x0a. int(x, 0) requires
+            # a str, not an int, hence the isinstance check (value defaults
+            # to the int 0 for BSS's always-uninitialized writes).
+            parsed = value if isinstance(value, int) else int(value, 0)
+            byte_value = parsed.to_bytes(specifier, "little")
             for i in range(times):
                 memory.write_bytes(current_rip + i*specifier, byte_value, specifier)
         except ValueError:
