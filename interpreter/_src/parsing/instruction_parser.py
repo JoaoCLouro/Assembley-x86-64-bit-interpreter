@@ -300,7 +300,7 @@ class Instruction_Parser:
                 operand_obj.set(expr, 2, self._parse_numeric_literal(expr), size)
             elif self.is_label(expr):
                 resolved = self._solve_label_or_constant(expr)
-                operand_obj.set(str(resolved), 2, resolved, size)
+                operand_obj.set(expr, 2, resolved, size)
             else:
                 raise ValueError("Program parsing ran into a problem! Aborting execution ...")
 
@@ -398,10 +398,7 @@ class Instruction_Parser:
             return int(self.constants[name]["value"])
         for section in (self.data, self.rodata, self.bss):
             if name in section:
-                addresses = section[name]["addresses"]
-                if isinstance(addresses, int):
-                    return addresses
-                return addresses[0]
+                return section[name]["addresses"][0] # type: ignore
         raise SyntaxError(f"INVALID SYNTAX FORMAT AT LINE {self.rip}! Unresolved label or constant: '{name}'")
 
     def _solve_memory_operand(self, operand: str) -> int:

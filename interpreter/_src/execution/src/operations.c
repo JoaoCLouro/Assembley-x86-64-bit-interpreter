@@ -310,12 +310,16 @@ static unsigned long long get_operand_value(Info *s, Operand *op)
             {
                 case 1:
                     value = (unsigned long long) read_1b_reg(s->registers, op->address, op->is_high);
+                    break;
                 case 2:
                     value = (unsigned long long)  read_2b_reg(s->registers, op->address);
+                    break;
                 case 4:
                     value = (unsigned long long)  read_4b_reg(s->registers, op->address);
+                    break;
                 case 8:
                     value = (unsigned long long)  read_8b_reg(s->registers, op->address);
+                    break;
                 default:
                     value = 0;
             }

@@ -525,7 +525,7 @@ class Segment_Mapper:
             sys.exit(ExitCode.NO_START_LABEL)
 
         self.rip = index + 1 # Set instruction pointer to the line after the start declaration
-        self.fetch_labels(index)
+        self.fetch_labels(index + 2)
         # Exit validation is verified while running
 
 
@@ -610,8 +610,7 @@ class Segment_Mapper:
             line: list[str] = self.memory_list[index]
             if (Segment_Mapper._is_constant_declaration(line)):
                 self._load_constant(line, index)
-                index += 1
-                continue
+
             elif len(line) == 1 and line[0].endswith(":"):
                 variable = line[0].strip(":")
                 if (Segment_Mapper._exists_in_section(variable, self.labels)):
@@ -621,6 +620,7 @@ class Segment_Mapper:
                     sys.exit(ExitCode.RESERVED_KEYWORD_VIOLATION)
                 else:
                     self.labels[variable] = index
+                print(f"Label: {variable} stored with index: {index}")
             index += 1
 
 

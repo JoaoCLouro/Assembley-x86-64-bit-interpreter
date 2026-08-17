@@ -114,7 +114,8 @@ TOKENS_PATTERN = r"""(?x)
     \d+[\da-fA-F]*[hH]|           # Hex Suffix
     [01]+[bB]|                    # Binary
     0b[01]+|                      # Binary
-    [a-zA-Z_]\w*|                 # Instructions / Registers / Labels
+    [a-zA-Z_]\w*:|                # Label/variable declarations 
+    [a-zA-Z_]\w*|                 # Instructions / Registers / Labels (referenced, not declared)
     [-+]?\d+                      # Signed Decimals
 """
 

@@ -135,6 +135,7 @@ class Control_Unit:
     
     def _step(self) -> None:
         try:
+            print(f"-RAX: {self.registers.read_reg("rax")}")
             # 1. Gets the instruction, operands and functional unit in use and verifies it's compatibility it the operator count of the instruction
             if self.rip < len(self.text_section):
                 self._fetch()
