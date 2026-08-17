@@ -353,7 +353,6 @@ class Data_Path:
         elif op2_type == 1:  # REGISTER
             try:
                 val = self.registers.read_reg(op2.expression)
-                print(f"Read: {val}")
             except ValueError as e:
                 raise SyntaxError from e
         else:               # MEMORY (op2_type == 0)
@@ -366,11 +365,8 @@ class Data_Path:
         if op1.type == 1:    # REGISTER
             val = int.from_bytes(val, "little") if isinstance(val, bytes) else val
             try:
-                print(f"Write: {val}")
                 self.registers.write_reg(op1.expression, val)
-                print(f"{op1.expression}: {self.registers.read_reg(op1.expression)}")
             except ValueError as e:
-                print("Error")
                 raise SyntaxError from e
         else:               # MEMORY 
             if isinstance(val, int):
@@ -380,8 +376,6 @@ class Data_Path:
                 self.memory.write_bytes(op1.address, val, op1.size)
             except MemoryError as e:
                 raise SyntaxError from e
-        print(f"Moved {op2.expression} to {op1.expression}")
-        print(f"RAX: {self.registers.read_reg(op1.expression)}")
 
     def execute_push(self) -> None:
         """

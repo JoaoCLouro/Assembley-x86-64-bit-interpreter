@@ -135,18 +135,13 @@ class Control_Unit:
     
     def _step(self) -> None:
         try:
-            print(f"-RAX: {self.registers.read_reg("rax")}")
             # 1. Gets the instruction, operands and functional unit in use and verifies it's compatibility it the operator count of the instruction
             if self.rip < len(self.text_section):
-                self._fetch()
+                if self._fetch():
+                    self._execute(self.current_instruction)
             else:
                 print("NO VALID EXIT WAS VALID TO THE PROGRAM.\n Forcing program's exit...")
                 sys.exit(100)
-            # current_instruction will only be 'None' if rip points to a label in .text (which should be skipped)
-            if self.current_instruction != None:
-                # 2. Verifies if the instruction-operand set is valid and triggers the execution of the instruction in the respective functional unit
-                self._execute(self.current_instruction)
-                # 3. Increases rip 
             self.rip += 1
         except ValueError as e:
             print(e)
@@ -156,14 +151,14 @@ class Control_Unit:
     # Main Logic Implementation
     # -------------------------------
 
-    def _fetch(self) -> None:
+    def _fetch(self) -> bool:
         """
         Fetches the current instruction and its operands from the text section based on the instruction pointer (RIP).\n
         Sets the current instruction and current functional unit in use and validates and sets the operands and its size.
         Raises a ValueError if the instruction is invalid or if the operands are invalid.        
         
-        :return: None
-        :rtype: None
+        :return: True if an instruction was found, False if a label was found
+        :rtype: bool
         :raises ValueError: If the instruction is invalid or if the operands are invalid.
         """
         line: list[str] = self.text_section[self.rip]
@@ -173,8 +168,8 @@ class Control_Unit:
             sys.exit(ExitCode.SOFTWARE_ERROR)
         
         # Verifies if the line is a label declaration and skips it if so
-        if len(line) == 1 and line[0] in self.labels:
-            return 
+        if len(line) == 1 and line[0].strip(":") in self.labels:
+            return False
         
         # Verifies if the line is an instruction and sets the instruction, f.u. in use and operand info needed for execution (size, type, value, address)
         elif self._is_valid_instruction(line[0]):
@@ -192,7 +187,7 @@ class Control_Unit:
 
             # Verifies if the number of operands registered are compatible with the instructions documentation in the valid_instructions json file    
             if self._valid_operand_count():
-                return
+                return True
             else:
                 # If incompatible reset all info to a Null value and raise an exception
                 self.op1.clear()

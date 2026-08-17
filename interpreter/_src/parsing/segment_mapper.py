@@ -620,7 +620,6 @@ class Segment_Mapper:
                     sys.exit(ExitCode.RESERVED_KEYWORD_VIOLATION)
                 else:
                     self.labels[variable] = index
-                print(f"Label: {variable} stored with index: {index}")
             index += 1
 
 
