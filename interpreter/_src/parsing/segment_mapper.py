@@ -257,7 +257,8 @@ class Segment_Mapper:
                 return False
         
         elif not Segment_Mapper._valid_size_specifier(line[1], section.lstrip(".")):
-            print(f"INVALID {section.upper()} SIZE SPECIFIER AT LINE {index}. Exiting program on a SyntaxError...")
+            print(f"Expression: {line[1]}")
+            print(f"INVALID {section.upper()} SECTION SIZE SPECIFIER AT LINE {index}. Exiting program on a SyntaxError...")
             return False
         
             # 5. Fast value checks
@@ -306,7 +307,7 @@ class Segment_Mapper:
         # total number of bytes to allocate
         size: int = number_of_bytes * times
 
-        addresses: list[Address] = self._define_segment(section, line[0].strip(":"), size, current_rip)
+        addresses: list[Address] = self._define_segment(section, line[0].strip(':'), size, current_rip)
 
         Segment_Mapper._write_section_to_memory(self.memory, times, number_of_bytes, addresses, current_rip, value=line[4])
         current_rip += size
@@ -347,7 +348,7 @@ class Segment_Mapper:
                 size += len(value)
 
         # Initializes the new entry on the correct section
-        self._define_segment(section, line[0].strip(":"), size, current_rip)
+        self._define_segment(section, line[0].strip(':'), size, current_rip)
 
         for value in line[2:]:
             if Segment_Mapper._is_numeric(value):
@@ -374,7 +375,7 @@ class Segment_Mapper:
         """
         number_of_bytes: int = SIZE_DIRECTIVES[line[1]][0]
         size: int = number_of_bytes
-        addresses: list[Address] = self._define_segment(section, line[0].strip(":"), size, current_rip)
+        addresses: list[Address] = self._define_segment(section, line[0].strip(':'), size, current_rip)
 
         Segment_Mapper._write_section_to_memory(self.memory, 1, number_of_bytes, addresses, current_rip, value=line[2])
         current_rip += size
@@ -450,6 +451,8 @@ class Segment_Mapper:
             if not self.bss_format_validation(tokens, index):
                 sys.exit(ExitCode.BSS_FORMAT_ERROR)
 
+            label: str = tokens[0].rstrip(":")
+
             if "times" in tokens:
                 times: int = int(tokens[2])
                 number_of_bytes: int = SIZE_DIRECTIVES[tokens[3]][0]
@@ -459,14 +462,14 @@ class Segment_Mapper:
                 number_of_bytes: int = SIZE_DIRECTIVES[tokens[1]][0]
 
             size: int = number_of_bytes * times
-            if not Segment_Mapper._exists_in_section(tokens[0], self.bss_segment):
-                self.bss_segment[tokens[0]] = {'size': size, 'addresses': []}
+            if not Segment_Mapper._exists_in_section(label, self.bss_segment):
+                self.bss_segment[label] = {'size': size, 'addresses': []}
 
             addresses: list[Address] = []
             for i in range(size):
                 addresses.append(current_rip + i)
 
-            self.bss_segment[tokens[0]]['addresses'] = addresses
+            self.bss_segment[label]['addresses'] = addresses
             Segment_Mapper._write_section_to_memory(self.memory, times, number_of_bytes, addresses, current_rip)   # BSS is always uninitialized (0)
             current_rip += size
             index += 1
@@ -489,7 +492,7 @@ class Segment_Mapper:
         :return: True if the line is a valid .bss declaration, False otherwise
         :rtype: bool
         """
-        label: str = line[0]
+        label: str = line[0].rstrip(":")
 
         # Check label duplication
         if self._label_in_use(label):
@@ -500,6 +503,7 @@ class Segment_Mapper:
         elif not Segment_Mapper._valid_variable_name(label):
             print(f"INVALID VARIABLE NAME {label} AT LINE {index}. Exiting program on a SyntaxError...")
             return False
+
         if "times" in line:
             if not self.timed_data_validation(line, "data", "times"):
                 print(f"UNSUPPORTED OR INCORRECT 'TIMES' BSS DECLARATION AT LINE {index}. Exiting program on a SyntaxError...")
@@ -513,7 +517,7 @@ class Segment_Mapper:
         
         # Validates size specifier
         elif not Segment_Mapper._valid_size_specifier(line[1], "bss"):
-            print(f"INVALID BSS SIZE SPECIFIER AT LINE {index}. Exiting program on a SyntaxError...")
+            print(f"INVALID BSS SECTION SIZE SPECIFIER AT LINE {index}. Exiting program on a SyntaxError...")
             return False 
         
         # Validates values declared
@@ -756,8 +760,7 @@ class Segment_Mapper:
         if not self.common_constant_declaration_validation(line, line[0], index):
             return False
 
-        # Basic format checking
-        elif line[1].strip(":").lower() != "equ":
+        elif line[1].lower().rstrip(":") != "equ":
             print(f"INVALID CONSTANT DECLARATION AT LINE {index}. Exiting program on a SyntaxError...")
             return False
         
@@ -981,7 +984,9 @@ class Segment_Mapper:
         :return: True if the line defines a constant, False if it doesn't
         :rtype: bool
         """
-        return "equ:" in line or "EQU:" in line or line[0] == "#define"
+
+        stripped = [tok.rstrip(":") for tok in line]
+        return "equ" in stripped or "EQU" in stripped or line[0] == "#define"
         
     @staticmethod
     def _has_size_calculation(line: list[str]) -> bool:
