@@ -82,6 +82,7 @@ class Operand:
         return self.valid
 
     def __str__(self):
+        # For debug purposes 
         return "Operand: " + self.expression + "\nType: " + str(self.type) + "\nAddress: " + str(self.address) + "\nSize: " + str(self.size) + "\nHigh byte: " + str(self.is_high) + "\nSigned: " + str(self.is_signed) + "\nActive: " + str(self.valid)
 
 
@@ -195,8 +196,6 @@ class Instruction_Parser:
         if not self.validate_instruction_line(self.line):
             raise SyntaxError(f"Invalid instruction declaration syntax at line {self.rip}.")
         self.parse_operands(self.line[1:])
-        print(self.op1)
-        print(f"\n {self.op2}")
 
     def parse_operands(self, line: list[str]) -> None:
         """
