@@ -69,7 +69,7 @@ class Operand:
         """
         self.valid = False
         self.expression = ""
-        self.type = 0
+        self.type = -1
         self.address = 0
         self.size = 0
         self.is_high = 0
@@ -80,6 +80,9 @@ class Operand:
         Returns the usability status of this Operand object.
         """
         return self.valid
+
+    def __str__(self):
+        return "Operand: " + self.expression + "\nType: " + str(self.type) + "\nAddress: " + str(self.address) + "\nSize: " + str(self.size) + "\nHigh byte: " + str(self.is_high) + "\nSigned: " + str(self.is_signed) + "\nActive: " + str(self.valid)
 
 
 GP_REGISTER_ORDER = [
@@ -192,6 +195,8 @@ class Instruction_Parser:
         if not self.validate_instruction_line(self.line):
             raise SyntaxError(f"Invalid instruction declaration syntax at line {self.rip}.")
         self.parse_operands(self.line[1:])
+        print(self.op1)
+        print(f"\n {self.op2}")
 
     def parse_operands(self, line: list[str]) -> None:
         """

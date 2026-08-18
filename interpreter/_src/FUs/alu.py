@@ -103,6 +103,8 @@ class ALU:
                 getattr(op2, "is_signed", 0)
             )
 
+        # print(f"OP1\nExpression: {op1.expression}\nAddress: {op1.address}\n\nOP2\nExpression: {op2.expression}\nAddress: {op2.address}")
+
     def execute(self) -> None:
         """
         Executes the instruction loaded in the c structure.

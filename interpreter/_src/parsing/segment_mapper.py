@@ -449,8 +449,15 @@ class Segment_Mapper:
 
             if not self.bss_format_validation(tokens, index):
                 sys.exit(ExitCode.BSS_FORMAT_ERROR)
-            times: int = int(tokens[2])
-            number_of_bytes: int = SIZE_DIRECTIVES[tokens[1]][0]    
+
+            if "times" in tokens:
+                times: int = int(tokens[2])
+                number_of_bytes: int = SIZE_DIRECTIVES[tokens[3]][0]
+            else:
+                # plain reserve form: [label, size_spec, count]
+                times: int = int(tokens[2])
+                number_of_bytes: int = SIZE_DIRECTIVES[tokens[1]][0]
+
             size: int = number_of_bytes * times
             if not Segment_Mapper._exists_in_section(tokens[0], self.bss_segment):
                 self.bss_segment[tokens[0]] = {'size': size, 'addresses': []}
@@ -468,6 +475,12 @@ class Segment_Mapper:
     def bss_format_validation(self, line: list[str], index: int) -> bool:
         """
         Validates the format of a .bss declaration line.
+        Accepts either the plain reserve form (<label> <size_spec> <count>,
+        e.g. `buffer: resd 5`) or the 'times' form mirroring .data/.rodata
+        (<label> times <count> <size_spec> <value>, e.g. `buffer: times 5 dd 0`).
+        In the 'times' form, the trailing value token is accepted for
+        syntactic symmetry with .data but is never actually used - .bss is
+        always zero-initialized regardless of what's written there.
 
         :param line: full line of code that has a .bss declaration
         :type line: list[str]
@@ -487,7 +500,13 @@ class Segment_Mapper:
         elif not Segment_Mapper._valid_variable_name(label):
             print(f"INVALID VARIABLE NAME {label} AT LINE {index}. Exiting program on a SyntaxError...")
             return False
-        
+
+        if "times" in line:
+            if not self.timed_data_validation(line, "data", "times"):
+                print(f"UNSUPPORTED OR INCORRECT 'TIMES' BSS DECLARATION AT LINE {index}. Exiting program on a SyntaxError...")
+                return False
+            return True
+
         # Checks correct number of components declared
         if len(line) != 3:
             print(f"INVALID BSS DECLARATION AT LINE {index}. Exiting program on a SyntaxError...")
@@ -620,6 +639,7 @@ class Segment_Mapper:
                     sys.exit(ExitCode.RESERVED_KEYWORD_VIOLATION)
                 else:
                     self.labels[variable] = index
+                print(f"Label: {variable} stored with index: {index}")
             index += 1
 
 

@@ -240,7 +240,8 @@ static void flags_update(Info *s, unsigned long long result)
 {
     int bit_count = 8 * s->op1.size;
     int msb_mask = bit_count - 1;
-    unsigned long long bits_mask = (1ULL << bit_count) - 1;
+    
+    unsigned long long bits_mask = (bit_count >= 64) ? 0xFFFFFFFFFFFFFFFFULL : (1ULL << bit_count) - 1;
     unsigned long long res_msb = result & bits_mask;
 
     // Arithmetic flags
@@ -248,8 +249,44 @@ static void flags_update(Info *s, unsigned long long result)
     uint8_t sign = (uint8_t) ((res_msb >> (bit_count - 1)) & 1);
 
     // Logical flags
-    uint8_t carry = (uint8_t) ((result >> bit_count) & 1);
-    uint8_t overflow = (uint8_t) (((s->op1_value ^ result) & (s->op2_value ^ result)) >> msb_mask & 1);
+    uint8_t carry;
+    if (bit_count >= 64) {
+    
+        switch (s->opcode) {
+            case OP_ADD:
+            case OP_ADC:
+                carry = (uint8_t) (result < s->op1_value);
+                break;
+            case OP_SUB:
+            case OP_SBB:
+            case OP_CMP:
+                carry = (uint8_t) (s->op1_value < s->op2_value);
+                break;
+            default:
+                carry = 0;
+        }
+    } else {
+        carry = (uint8_t) ((result >> bit_count) & 1);
+    }
+
+    uint8_t overflow;
+    switch (s->opcode) {
+        case OP_ADD:
+        case OP_ADC:
+            // Addition overflow: operands have the SAME sign, but the
+            // result's sign differs from theirs.
+            overflow = (uint8_t) (((s->op1_value ^ result) & (s->op2_value ^ result)) >> msb_mask & 1);
+            break;
+        case OP_SUB:
+        case OP_SBB:
+        case OP_CMP:
+            // Subtraction overflow: operands have DIFFERENT signs, and
+            // the result's sign differs from op1's sign.
+            overflow = (uint8_t) (((s->op1_value ^ s->op2_value) & (s->op1_value ^ result)) >> msb_mask & 1);
+            break;
+        default:
+            overflow = 0;
+    }
 
     // More flags can be later implemented as needed
 
