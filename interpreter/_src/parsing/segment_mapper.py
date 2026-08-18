@@ -306,7 +306,7 @@ class Segment_Mapper:
         # total number of bytes to allocate
         size: int = number_of_bytes * times
 
-        addresses: list[Address] = self._define_segment(section, line[0], size, current_rip)
+        addresses: list[Address] = self._define_segment(section, line[0].strip(":"), size, current_rip)
 
         Segment_Mapper._write_section_to_memory(self.memory, times, number_of_bytes, addresses, current_rip, value=line[4])
         current_rip += size
@@ -347,7 +347,7 @@ class Segment_Mapper:
                 size += len(value)
 
         # Initializes the new entry on the correct section
-        self._define_segment(section, line[0], size, current_rip)
+        self._define_segment(section, line[0].strip(":"), size, current_rip)
 
         for value in line[2:]:
             if Segment_Mapper._is_numeric(value):
@@ -374,7 +374,7 @@ class Segment_Mapper:
         """
         number_of_bytes: int = SIZE_DIRECTIVES[line[1]][0]
         size: int = number_of_bytes
-        addresses: list[Address] = self._define_segment(section, line[0], size, current_rip)
+        addresses: list[Address] = self._define_segment(section, line[0].strip(":"), size, current_rip)
 
         Segment_Mapper._write_section_to_memory(self.memory, 1, number_of_bytes, addresses, current_rip, value=line[2])
         current_rip += size
@@ -500,7 +500,6 @@ class Segment_Mapper:
         elif not Segment_Mapper._valid_variable_name(label):
             print(f"INVALID VARIABLE NAME {label} AT LINE {index}. Exiting program on a SyntaxError...")
             return False
-
         if "times" in line:
             if not self.timed_data_validation(line, "data", "times"):
                 print(f"UNSUPPORTED OR INCORRECT 'TIMES' BSS DECLARATION AT LINE {index}. Exiting program on a SyntaxError...")
@@ -758,7 +757,7 @@ class Segment_Mapper:
             return False
 
         # Basic format checking
-        elif line[1].lower() != "equ":
+        elif line[1].strip(":").lower() != "equ":
             print(f"INVALID CONSTANT DECLARATION AT LINE {index}. Exiting program on a SyntaxError...")
             return False
         
@@ -982,7 +981,7 @@ class Segment_Mapper:
         :return: True if the line defines a constant, False if it doesn't
         :rtype: bool
         """
-        return "equ" in line or "EQU" in line or line[0] == "#define"
+        return "equ:" in line or "EQU:" in line or line[0] == "#define"
         
     @staticmethod
     def _has_size_calculation(line: list[str]) -> bool:
