@@ -202,7 +202,6 @@ class Segment_Mapper:
             # constant validation
             if (Segment_Mapper._is_constant_declaration(tokens)):
                 self._load_constant(tokens, index)
-                print(f"{tokens[0]} loaded")
 
             elif not self._data_format_validation(tokens, index, section):
                 sys.exit(ExitCode.DATA_FORMAT_ERROR)
