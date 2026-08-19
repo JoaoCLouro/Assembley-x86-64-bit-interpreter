@@ -1,6 +1,8 @@
 from enum import IntEnum
 
 class ExitCode(IntEnum):
+    SUCCESS = 0
+    IRRECOVERABLE_ERROR = -1000
     DATA_FORMAT_ERROR = -1
     BSS_FORMAT_ERROR = -2
     CONSTANT_DECLARATION_ERROR = -3
@@ -11,5 +13,7 @@ class ExitCode(IntEnum):
     INVALID_INSTRUCTION_SYNTAX = 10
     RESERVED_KEYWORD_VIOLATION = 11
     INVALID_SYSCALL = 12
+    NO_EXIT_FOUND = 13
+    INVALID_OR_UNSUPPORTED_INSTRUCTION = 14
     SOFTWARE_ERROR = 109101
     # To be continued later

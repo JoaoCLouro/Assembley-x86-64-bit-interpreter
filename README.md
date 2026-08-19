@@ -23,6 +23,66 @@ This projects offers two main interfaces:
 
 Before using please make sure your code follows the [Code format references](#code-format-and-syntax-references)
 
+## Installation & Distribution
+
+### 1. From GitHub Releases (Pre-built Package)
+
+Download and install the pre-compiled wheel directly from the [v0.1.0 GitHub Release](https://github.com/JoaoCLouro/Assembley-x86-64-bit-interpreter/releases/tag/v0.1.0):
+
+```bash
+pip install [https://github.com/JoaoCLouro/Assembley-x86-64-bit-interpreter/releases/download/v0.1.0/cpu_simulator-0.1.0-py3-none-any.whl](https://github.com/JoaoCLouro/Assembley-x86-64-bit-interpreter/releases/download/v0.1.0/cpu_simulator-0.1.0-py3-none-any.whl)
+```
+
+### 2. From Source
+
+Clone the repository and build using standard tools:
+```bash
+git clone [https://github.com/JoaoCLouro/Assembley-x86-64-bit-interpreter.git](https://github.com/JoaoCLouro/Assembley-x86-64-bit-interpreter.git)
+cd Assembley-x86-64-bit-interpreter
+
+# Build C libraries
+make
+
+# Build local distribution wheels
+python -m pip install pyproject-build
+pyproject-build
+pip install dist/cpu_simulator-0.1.0-py3-none-any.whl
+```
+
+
+## Quick Start & Usage 
+
+### CLI Usage
+
+Execute assembly files using the `main.py` runner or installed package entry point:
+```bash 
+# Direct runner
+python main.py <path-to-your-asm-file>
+
+# Interactive prompt mode (when no file argument is provided)
+python main.py
+```
+
+### Programmatic Python API
+
+The top-level `interpreter` package exposes `Interpreter` and `ExitCode` for programmatically controlling and inspecting simulation runs:
+
+```python
+from interpreter import Interpreter, ExitCode
+
+# Initialize the CPU simulator with an assembly program
+sim = Interpreter("path/to/program.asm")
+
+# Execute program until termination or error
+exit_status = sim.run()
+
+if exit_status == ExitCode.SUCCESS:
+    # Inspect final CPU registers or memory state
+    print(f"Registers: {sim.get_state("registers")}")
+else:
+    print(f"Execution failed with status: {exit_status}")
+```
+
 ---
 
 ## Pipeline
@@ -73,72 +133,37 @@ Before using please make sure your code follows the [Code format references](#co
 ```text
 CPU_SIMULATOR/
 ├── interpreter/                 # Main Python package
-│   ├── _src/                    # Internal source code
-│   │   ├── bridges/             # C-to-Python bindings
-│   │   │   ├── register_manager.py # ctypes -> libreg.so
-│   │   │   └── data_memory.py      # ctypes -> libmmu.so
+│   ├── _src/                    # Internal engine code & execution units
+│   │   ├── bridges/             # C-to-Python ctypes bindings
 │   │   ├── execution/           # C execution engine source & headers
-│   │   │   ├── include/         # registers.h, memory_eng.h, operations.h
-│   │   │   └── src/             # registers.c, memory_eng.c, operations.c
-│   │   ├── FUs/                 # Functional Units (execution modules)
-│   │   │   ├── alu.py           # Arithmetic Logic Unit implementation
-│   │   │   ├── fpu.py           # Floating Point Unit implementation
-│   │   │   ├── data_path.py     # Data path signal routing
-│   │   │   └── common_classes.py # Shared data structures and base FU classes
-│   │   ├── helpers/             # Shared utility modules (e.g., storage.py)
+│   │   ├── FUs/                 # Functional Units (ALU, FPU, DataPath)
+│   │   ├── helpers/             # Shared utility modules
 │   │   ├── lib/                 # Compiled shared libraries (.so)
-│   │   ├── parsing/             # Phase 1 & 2 parsing components
-│   │   │   ├── segment_mapper.py        # Phase 1: parse, map to memory, validate
-│   │   │   ├── control_unit.py          # Phase 2: execution loop & instruction dispatch
-│   │   │   ├── instruction_parser.py    # Instruction decoding and operand processing
-│   │   │   └── pattern_matching_helpers.py # Regex and token matching utilities
-│   │   └── program_cache/       # Cached/processed JSON files
-│   ├── __init__.py
+│   │   ├── parsing/             # Segment mapper, control unit, and instruction parsers
+│   │   └── program_cache/       # Program layout cache
+│   ├── __init__.py              # Public API exports (Interpreter, ExitCode)
 │   ├── exit_codes.py            # ExitCodes enum class holder
 │   └── interpreter.py           # Program's core runner class
-├── tests/                       # Test suites & resources
-│   ├── asm/                     # Example assembly files for testing
-│   ├── bin/                     # Compiled test binaries/fixtures
-│   ├── bridge/                  # Python bridge test suite
-│   ├── execution_tests/         # C-level unit tests
-│   ├── parser/                  # Parser test suite
-│   ├── storage_tests/           # Python storage system test suite
-│   ├── conftest.py              # Pytest configuration and path routing
-│   ├── test_cpu.py              # CPU integration test suite
-│   └── test_env.py              # Environment configuration tests
-├── build/                       # Intermediate C build files (.o)
+├── tests/                       # C and Python test suites
 ├── docs/                        # Project documentation
 ├── .gitignore
-├── main.py                      # CLI entry point
-├── Makefile                     # Build targets for C libraries and tests
-└── pyproject.toml               # Package configuration and dependencies
+├── main.py                      # CLI entry point script
+├── Makefile                     # Build targets for C shared libraries
+└── pyproject.toml               # Setuptools distribution metadata
 ```
 
 ## Building
- 
-```bash
-make          # builds lib/libreg.so, lib/libmmu.so, lib/liboperations.so
-make test     # builds and runs the C-level test binaries
-make clean    # removes build/, lib/, and test binaries
-```
- 
-## Testing
-
-Python-side tests, independent of whether the C libraries are built. In case they are needed and are not built will skip tests.
-Execute from the root:
 
 ```bash
-pytest tests/bridge/ -v
+# Build C shared libraries (libreg.so, libmmu.so, liboperations.so)
+make
+
+# Run C-level engine unit tests
+make test
+
+# Run Python integration and bridge test suite
+pytest tests/ -v
 ```
-
-## Usage
-
-This program can take up to one command-line argument providing a path to a asm file. If no file is detected or if an invalid file is detected the program will prompt for a valid file until the execution is halted or until one valid path is provided. Ex:
-```bash
-$py main.py tests/asm/example.asm 
-```
-
-You can also use the class object provided by the class `interpreter` which enables state observation and fetching, as well as extended debugging.
 
 ---
 
@@ -275,18 +300,21 @@ The application returns the following exit codes to indicate success or specific
 
 | Code | Enum Constant | Description |
 | :--- | :--- | :--- |
-| **0** | *Implicit* | Successful execution and exit. |
-| **-1** | `DATA_FORMAT_ERROR` | Unsuccessful exit due to incorrect `.data`/`.rodata` format detected in the parsing phase. |
-| **-2** | `BSS_FORMAT_ERROR` | Unsuccessful exit due to incorrect `.bss` format detected in the parsing phase. |
-| **-3** | `CONSTANT_DECLARATION_ERROR` | Unsuccessful exit due to an incorrect constant declaration format. |
-| **1** | `NO_START_LABEL` | Unsuccessful exit due to not finding an entry point to the program during `.text` parsing. |
-| **2** | `DUPLICATE_LABEL` | Unsuccessful exit due to a duplicated label declaration found during `.text` parsing. |
-| **4** | `UNOPENABLE_FILE` | Unsuccessful exit because the target file could not be opened or read. |
-| **5** | `STACK_OVERFLOW` | Unsuccessful exit due to a detected stack overflow (stack exceeds its allowed size). |
-| **10** | `INVALID_INSTRUCTION_SYNTAX` | Unsuccessful exit due to a syntax error in an instruction during parsing. |
-| **11** | `RESERVED_KEYWORD_VIOLATION` | Unsuccessful exit due to conflict in label declaration with a reserved keyword |
-| **12** | `INVALID_SYSCALL` | Unsuccessful exit due to an unsupported syscall or incorrect syscall |
-| **109101** | `SOFTWARE_ERROR` | Unsuccessful exit due to an internal software bug (ASCII representation of "me"). |
+| **-1000** | `IRRECOVERABLE_ERROR`[cite: 2] | Unsuccessful exit due to a critical, non-recoverable runtime or state error[cite: 2]. |
+| **-3** | `CONSTANT_DECLARATION_ERROR`[cite: 2] | Unsuccessful exit due to an incorrect constant declaration format[cite: 2]. |
+| **-2** | `BSS_FORMAT_ERROR`[cite: 2] | Unsuccessful exit due to incorrect `.bss` format detected in the parsing phase[cite: 2]. |
+| **-1** | `DATA_FORMAT_ERROR`[cite: 2] | Unsuccessful exit due to incorrect `.data`/`.rodata` format detected in the parsing phase[cite: 2]. |
+| **0** | `SUCCESS`[cite: 2] | Successful execution and exit[cite: 2]. |
+| **1** | `NO_START_LABEL`[cite: 2] | Unsuccessful exit due to not finding an entry point to the program during `.text` parsing[cite: 2]. |
+| **2** | `DUPLICATE_LABEL`[cite: 2] | Unsuccessful exit due to a duplicated label declaration found during `.text` parsing[cite: 2]. |
+| **4** | `UNOPENABLE_FILE`[cite: 2] | Unsuccessful exit because the target file could not be opened or read[cite: 2]. |
+| **5** | `STACK_OVERFLOW`[cite: 2] | Unsuccessful exit due to a detected stack overflow (stack exceeds allowed limits)[cite: 2]. |
+| **10** | `INVALID_INSTRUCTION_SYNTAX`[cite: 2] | Unsuccessful exit due to a syntax error in an instruction during parsing[cite: 2]. |
+| **11** | `RESERVED_KEYWORD_VIOLATION`[cite: 2] | Unsuccessful exit due to conflict in label declaration with a reserved keyword[cite: 2]. |
+| **12** | `INVALID_SYSCALL`[cite: 2] | Unsuccessful exit due to an unsupported or malformed system call[cite: 2]. |
+| **13** | `NO_EXIT_FOUND`[cite: 2] | Unsuccessful exit due to reaching end-of-program without encountering an explicit exit syscall or termination instruction[cite: 2]. |
+| **14** | `INVALID_OR_UNSUPPORTED_INSTRUCTION`[cite: 2] | Unsuccessful exit due to an unrecognized or unimplemented instruction mnemonic[cite: 2]. |
+| **109101** | `SOFTWARE_ERROR`[cite: 2] | Unsuccessful exit due to an internal software bug (ASCII representation of "me")[cite: 2]. |
 
 ---
 

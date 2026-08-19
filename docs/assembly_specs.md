@@ -226,24 +226,27 @@ If neither operand is a register (e.g. both operands are unsized memory referenc
 
 ---
 
-## 6. Exit Status Code Reference
+## 6. Exit codes status reference
 
-The simulator halts and emits standardized status codes upon completion or error detection:
+The application returns the following exit codes to indicate success or specific failure states during execution:
 
 | Code | Enum Constant | Description |
 | :--- | :--- | :--- |
-| **0** | *Implicit* | Successful execution and exit. |
-| **-1** | `DATA_FORMAT_ERROR` | Unsuccessful exit due to incorrect `.data`/`.rodata` format detected in the parsing phase. |
-| **-2** | `BSS_FORMAT_ERROR` | Unsuccessful exit due to incorrect `.bss` format detected in the parsing phase. |
-| **-3** | `CONSTANT_DECLARATION_ERROR` | Unsuccessful exit due to an incorrect constant declaration format. |
-| **1** | `NO_START_LABEL` | Unsuccessful exit due to not finding an entry point to the program during `.text` parsing. |
-| **2** | `DUPLICATE_LABEL` | Unsuccessful exit due to a duplicated label declaration found during `.text` parsing. |
-| **4** | `UNOPENABLE_FILE` | Unsuccessful exit because the target file could not be opened or read. |
-| **5** | `STACK_OVERFLOW` | Unsuccessful exit due to a detected stack overflow (stack exceeds its allowed size). |
-| **10** | `INVALID_INSTRUCTION_SYNTAX` | Unsuccessful exit due to a syntax error in an instruction during parsing. |
-| **11** | `RESERVED_KEYWORD_VIOLATION` | Unsuccessful exit due to conflict in label declaration with a reserved keyword |
-| **12** | `INVALID_SYSCALL` | Unsuccessful exit due to an unsupported syscall or incorrect syscall |
-| **109101** | `SOFTWARE_ERROR` | Unsuccessful exit due to an internal software bug (ASCII representation of "me"). |
+| **-1000** | `IRRECOVERABLE_ERROR`[cite: 2] | Unsuccessful exit due to a critical, non-recoverable runtime or state error[cite: 2]. |
+| **-3** | `CONSTANT_DECLARATION_ERROR`[cite: 2] | Unsuccessful exit due to an incorrect constant declaration format[cite: 2]. |
+| **-2** | `BSS_FORMAT_ERROR`[cite: 2] | Unsuccessful exit due to incorrect `.bss` format detected in the parsing phase[cite: 2]. |
+| **-1** | `DATA_FORMAT_ERROR`[cite: 2] | Unsuccessful exit due to incorrect `.data`/`.rodata` format detected in the parsing phase[cite: 2]. |
+| **0** | `SUCCESS`[cite: 2] | Successful execution and exit[cite: 2]. |
+| **1** | `NO_START_LABEL`[cite: 2] | Unsuccessful exit due to not finding an entry point to the program during `.text` parsing[cite: 2]. |
+| **2** | `DUPLICATE_LABEL`[cite: 2] | Unsuccessful exit due to a duplicated label declaration found during `.text` parsing[cite: 2]. |
+| **4** | `UNOPENABLE_FILE`[cite: 2] | Unsuccessful exit because the target file could not be opened or read[cite: 2]. |
+| **5** | `STACK_OVERFLOW`[cite: 2] | Unsuccessful exit due to a detected stack overflow (stack exceeds allowed limits)[cite: 2]. |
+| **10** | `INVALID_INSTRUCTION_SYNTAX`[cite: 2] | Unsuccessful exit due to a syntax error in an instruction during parsing[cite: 2]. |
+| **11** | `RESERVED_KEYWORD_VIOLATION`[cite: 2] | Unsuccessful exit due to conflict in label declaration with a reserved keyword[cite: 2]. |
+| **12** | `INVALID_SYSCALL`[cite: 2] | Unsuccessful exit due to an unsupported or malformed system call[cite: 2]. |
+| **13** | `NO_EXIT_FOUND`[cite: 2] | Unsuccessful exit due to reaching end-of-program without encountering an explicit exit syscall or termination instruction[cite: 2]. |
+| **14** | `INVALID_OR_UNSUPPORTED_INSTRUCTION`[cite: 2] | Unsuccessful exit due to an unrecognized or unimplemented instruction mnemonic[cite: 2]. |
+| **109101** | `SOFTWARE_ERROR`[cite: 2] | Unsuccessful exit due to an internal software bug (ASCII representation of "me")[cite: 2]. |
 
 ---
 

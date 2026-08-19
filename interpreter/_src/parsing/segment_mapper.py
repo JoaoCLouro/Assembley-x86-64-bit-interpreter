@@ -38,7 +38,7 @@ class Segment_Mapper:
     __slots__ = (
         'stack_limit', 'memory_list', 'rodata_segment', 'data_segment', 
         'bss_segment', 'labels', 'constants', 'file_name', 
-        'memory', 'rip', 'registers'
+        'memory', 'rip', 'registers', 'exit_status'
     )
 
 
@@ -88,11 +88,18 @@ class Segment_Mapper:
         self.registers: Registers_Interface = Registers_Interface()
         # Memory handler class instance 
         self.memory: Data_Memory = Data_Memory(self.registers, RODATA_BASE)
+
+
+        self.exit_status: ExitCode = ExitCode.SUCCESS
         
         self._load_program(self.file_name)
-        self._load_text()
-        self._initialize_stack(argvcount, argv, self.memory, self.stack_limit)
-        self._parse_section()
+        try:
+            self._load_text()
+            self._initialize_stack(argvcount, argv, self.memory, self.stack_limit)
+            self._parse_section()
+        except SystemExit as e:
+            self.exit_status = ExitCode.IRRECOVERABLE_ERROR
+
 
     # -----------------------
     # PROGRAM LOADING

@@ -369,7 +369,7 @@ class TestStep:
         with pytest.raises(SystemExit) as exc_info:
             control_unit._step()
 
-        assert exc_info.value.code == 100
+        assert exc_info.value.code == ExitCode.NO_EXIT_FOUND
 
     def test_step_label_line_does_not_execute_but_advances_rip(self, control_unit, instructions_patch):
         instructions_patch({})
@@ -392,7 +392,7 @@ class TestStep:
         with pytest.raises(SystemExit) as exc_info:
             control_unit._step()
 
-        assert exc_info.value.code == 1
+        assert exc_info.value.code == ExitCode.INVALID_OR_UNSUPPORTED_INSTRUCTION
 
 
 # ---------------------------------------------------------------------------

@@ -78,7 +78,10 @@ class Control_Unit:
     # Callable methods
     # ------------------
 
-    def run(self) -> None:
+    def run(self) -> ExitCode:
+        """
+        Runs the interpreter
+        """
         self.rip += 1
         # Improve this loop to enable debugging features
         while not self.finished:
@@ -91,6 +94,10 @@ class Control_Unit:
             except Exception as e:
                 print(f"CPU Exception at line {self.rip}: {e}")
                 self.finished = True
+            except SystemExit as e:
+                print(f"Exit due to {e}")
+                return e # type: ignore
+        return ExitCode.SUCCESS
 
     def get_state(self, section: str) -> dict[str, int]:
             """
@@ -141,11 +148,11 @@ class Control_Unit:
                     self._execute(self.current_instruction)
             else:
                 print("NO VALID EXIT WAS VALID TO THE PROGRAM.\n Forcing program's exit...")
-                sys.exit(100)
+                sys.exit(ExitCode.NO_EXIT_FOUND)
             self.rip += 1
         except ValueError as e:
             print(e)
-            sys.exit(1) 
+            sys.exit(ExitCode.INVALID_OR_UNSUPPORTED_INSTRUCTION) 
 
     # -------------------------------
     # Main Logic Implementation

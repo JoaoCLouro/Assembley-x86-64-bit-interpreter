@@ -1,6 +1,8 @@
 import os
 import sys
 
+from.exit_codes import ExitCode
+
 from ._src.parsing.segment_mapper import Segment_Mapper
 from ._src.parsing.control_unit import Control_Unit
 from ._src.helpers.storage import Storage
@@ -39,12 +41,23 @@ class Interpreter_x86:
         self.memory = self.loader.memory
         self.register = self.loader.registers
         self.cpu: Control_Unit = Control_Unit(self.loader, debugging)
-        self.cpu.run()
-        # State could be offered here
-    
+
     def __del__(self):
         # Triggers all state variables cleanup
         self.cpu = None # type: ignore
+        self.loader = None # type: ignore
+        if self.memory:
+            self.memory.clean()
+        if self.register:
+            self.register.clean()
+
+    def run(self) -> ExitCode:
+        """
+        Runs the interpreter and returns the appropriate exit code sent by the interpreter in case of a savable exit code.\n
+        If the program fails at segment parsing returns an unrecoverable exit status
+        """
+        return ExitCode.IRRECOVERABLE_ERROR if self.loader.exit_status != ExitCode.SUCCESS else self.cpu.run()
+            
 
     def exit(self) -> dict[str, int]:
         """
