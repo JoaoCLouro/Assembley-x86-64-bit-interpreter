@@ -104,7 +104,7 @@ FPU_REGISTER_ORDER = [f"xmm{i}" for i in range(16)] + [f"ymm{i}" for i in range(
 # match the entire joined string). re.sub removes every occurrence, wherever
 # it appears, which is what's actually needed here.
 _ANCHOR_CHARS = re.compile(r'[\^$]')
-_SIZE_PATTERN_STR = fr'(?:{"|".join(re.escape(_ANCHOR_CHARS.sub("", k)) for k in PM.SIZE_DIRECTIVES.keys())})'
+_SIZE_PATTERN_STR = fr'(?:{"|".join(re.escape(_ANCHOR_CHARS.sub("", k)) for k in (*PM.SIZE_DIRECTIVES.keys(), *PM.MASKS_DIRECTIVES.keys()))})'
 _OP_PATTERN_STR = fr'(?:{_ANCHOR_CHARS.sub("", PM.OPERAND_PATTERN)})'
 
 ONE_OPERAND_PATTERN = re.compile(
@@ -235,16 +235,20 @@ class Instruction_Parser:
         ret_list: list[str] = ["", "", "", ""]
         max_ret_value: int = 3
         last_idx: int = len(line) - 1
-        size_directives = PM.SIZE_DIRECTIVES
+        size_directives = PM.SIZE_DIRECTIVES        # data declarations: db/dw/dd/dq
+        mask_directives = PM.MASKS_DIRECTIVES        # instruction operand prefixes: byte/word/dword/qword
         operand_re = re.compile(fr'^({PM.OPERAND_PATTERN})$')
 
         i = 0
         while i < len(line):
             token = line[i]
             size_entry = size_directives.get(token)
-            # SIZE_DIRECTIVES values are (byte_size, is_initialized) tuples;
-            # only the byte size is relevant to the returned size string.
-            size = size_entry[0] if size_entry is not None else None
+
+            if size_entry is not None:
+                size = size_entry[0]
+            else:
+                mask = mask_directives.get(token)
+                size = (mask.bit_length() // 8) if mask is not None else None
 
             if size is not None:
                 if i == last_idx or not operand_re.match(line[i + 1]):
