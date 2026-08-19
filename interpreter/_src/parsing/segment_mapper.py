@@ -256,7 +256,6 @@ class Segment_Mapper:
                 return False
         
         elif not Segment_Mapper._valid_size_specifier(line[1], section.lstrip(".")):
-            print(f"Expression: {line[1]}")
             print(f"INVALID {section.upper()} SECTION SIZE SPECIFIER AT LINE {index}. Exiting program on a SyntaxError...")
             return False
         
@@ -641,7 +640,6 @@ class Segment_Mapper:
                     sys.exit(ExitCode.RESERVED_KEYWORD_VIOLATION)
                 else:
                     self.labels[variable] = index
-                print(f"Label: {variable} stored with index: {index}")
             index += 1
 
 
