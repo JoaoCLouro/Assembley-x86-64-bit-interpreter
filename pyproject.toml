@@ -7,12 +7,10 @@ name = "cpu-simulator"
 version = "0.1.0"
 description = "x86-64 assembly interpreter (Python + C)"
 requires-python = ">=3.10"
+dependencies = []
 
 [tool.setuptools.packages.find]
-where = ["interpreter/_src"]
-
-[tool.setuptools.package-dir]
-"" = "interpreter/_src"
+include = ["interpreter"]
 
 [project.optional-dependencies]
 test = ["pytest"]
