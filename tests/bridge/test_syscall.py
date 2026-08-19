@@ -110,8 +110,10 @@ class TestDispatch:
     def test_exit_does_not_write_to_rax(self, syscall, mock_registers):
         set_call(mock_registers, rax=Syscall.SYS_EXIT)
 
-        with pytest.raises(SystemExit):
-            syscall.syscall()
+        result = syscall.syscall()
+
+        assert result == 1
+        assert mock_registers.read_reg('rax') == Syscall.SYS_EXIT  # untouched
 
     def test_reads_registers_before_dispatch(self, syscall, mock_registers):
         syscall.lib.sys_write.return_value = 0
@@ -131,10 +133,9 @@ class TestDispatch:
 
 class TestExit:
 
-    def test_exit_raises_system_exit_zero(self, syscall):
-        with pytest.raises(SystemExit) as exc_info:
-            syscall.exit()
-        assert exc_info.value.code == 0
+    def test_exit_returns_one(self, syscall):
+        result = syscall.exit()
+        assert result == 1
 
 
 # ---------------------------------------------------------------------------
