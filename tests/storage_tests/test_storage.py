@@ -44,17 +44,16 @@ def isolate_filesystem(tmp_path, monkeypatch):
 # ---------------------------------------------------------------------------
 
 class TestCleanCache:
-    def test_removes_all_files_except_valid_instructions(self, tmp_path):
+    def test_removes_all_cache_files(self, tmp_path):
         cache = tmp_path / "cache"
         (cache / "temp1.json").write_text("[]")
         (cache / "temp2.json").write_text("[]")
-        (cache / "valid_instructions.json").write_text("{}")
         
         Storage.clean_cache()
         
         assert not (cache / "temp1.json").exists()
         assert not (cache / "temp2.json").exists()
-        assert (cache / "valid_instructions.json").exists()
+        assert not any(cache.iterdir())  # Ensures the cache directory is completely empty
 
 
 # ---------------------------------------------------------------------------

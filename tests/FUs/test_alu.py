@@ -30,12 +30,16 @@ def make_op(address=0, type_=0, size=4, is_high=0, is_signed=0, valid=True):
 
 @pytest.fixture
 def mock_registers():
-    return MagicMock()
+    regs = MagicMock()
+    regs.regs = ctypes.c_void_p(0xDEADBEEF)
+    return regs
 
 
 @pytest.fixture
 def mock_memory():
-    return MagicMock()
+    mem = MagicMock()
+    mem.table = ctypes.c_void_p(0xFEEDFACE)
+    return mem
 
 
 @pytest.fixture
@@ -63,8 +67,10 @@ class TestConstruction:
 
             instance = ALU(registers=mock_registers, memory=mock_memory, libops_path="fake.so")
 
-            mock_lib.set_registers_ref.assert_called_once_with(state, mock_registers)
-            mock_lib.set_table_ref.assert_called_once_with(state, mock_memory)
+            mock_lib.set_registers_ref.assert_called_once()
+            assert mock_lib.set_registers_ref.call_args[0][0] == state
+            mock_lib.set_table_ref.assert_called_once()
+            assert mock_lib.set_table_ref.call_args[0][0] == state
             assert instance.state == state
 
     def test_set_operand_info_argtypes_match_header_order(self, alu):

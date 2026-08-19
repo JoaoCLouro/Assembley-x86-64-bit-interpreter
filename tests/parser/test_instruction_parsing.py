@@ -554,6 +554,7 @@ class TestSolveOperandsTwoOperands:
 
 
 class TestSolveOperandsLabelsAndConstants:
+
     def test_label_resolves_to_line_index(self, parser):
         parser.labels["loop_start"] = 42
 
@@ -561,7 +562,7 @@ class TestSolveOperandsLabelsAndConstants:
 
         assert parser.op1.type == 2  # immediate-class
         assert parser.op1.address == 42
-        assert parser.op1.expression == "42"
+        assert parser.op1.expression == "loop_start"
 
     def test_constant_resolves_to_its_value(self, parser):
         parser.constants["MAX_SIZE"] = {"line": 3, "value": 256}
@@ -569,7 +570,7 @@ class TestSolveOperandsLabelsAndConstants:
         parser.solve_operands(["", "", "", "MAX_SIZE"])
 
         assert parser.op1.address == 256
-        assert parser.op1.expression == "256"
+        assert parser.op1.expression == "MAX_SIZE"
 
     def test_unresolved_label_raises_syntax_error(self, parser):
         with pytest.raises(SyntaxError):
@@ -719,7 +720,7 @@ class TestOperandClear:
 
         assert op.is_valid() is False
         assert op.expression == ""
-        assert op.type == 0
+        assert op.type == -1
         assert op.address == 0
         assert op.size == 0
         assert op.is_high == 0

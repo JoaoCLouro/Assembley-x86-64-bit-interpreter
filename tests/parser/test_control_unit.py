@@ -84,7 +84,7 @@ class TestIsValidInstruction:
         instructions_patch({})  # not even present in INSTRUCTIONS; syscall short-circuits
         control_unit.current_fu = "alu"  # prove it gets overwritten
 
-        result = control_unit.is_valid_instruction("syscall")
+        result = control_unit._is_valid_instruction("syscall")
 
         assert result is True
         assert control_unit.current_fu == "cpu"
@@ -92,7 +92,7 @@ class TestIsValidInstruction:
     def test_known_instruction_sets_matching_fu(self, control_unit, instructions_patch):
         instructions_patch({"alu": {"add": 2}, "fpu": {"fadd": 2}})
 
-        result = control_unit.is_valid_instruction("add")
+        result = control_unit._is_valid_instruction("add")
 
         assert result is True
         assert control_unit.current_fu == "alu"
@@ -100,7 +100,7 @@ class TestIsValidInstruction:
     def test_known_instruction_in_different_fu(self, control_unit, instructions_patch):
         instructions_patch({"alu": {"add": 2}, "fpu": {"fadd": 2}})
 
-        result = control_unit.is_valid_instruction("fadd")
+        result = control_unit._is_valid_instruction("fadd")
 
         assert result is True
         assert control_unit.current_fu == "fpu"
@@ -108,7 +108,7 @@ class TestIsValidInstruction:
     def test_unknown_instruction_returns_false(self, control_unit, instructions_patch):
         instructions_patch({"alu": {"add": 2}})
 
-        result = control_unit.is_valid_instruction("nonexistent_op")
+        result = control_unit._is_valid_instruction("nonexistent_op")
 
         assert result is False
 
@@ -116,7 +116,7 @@ class TestIsValidInstruction:
         instructions_patch({"alu": {"add": 2}})
         control_unit.current_fu = "data_path"
 
-        control_unit.is_valid_instruction("nonexistent_op")
+        control_unit._is_valid_instruction("nonexistent_op")
 
         assert control_unit.current_fu == "data_path"
 
@@ -129,20 +129,20 @@ class TestGetCurrentFu:
 
     def test_returns_data_path_instance(self, control_unit):
         control_unit.current_fu = "data_path"
-        assert control_unit.get_current_fu() is control_unit.data_path
+        assert control_unit._get_current_fu() is control_unit.data_path
 
     def test_returns_alu_instance(self, control_unit):
         control_unit.current_fu = "alu"
-        assert control_unit.get_current_fu() is control_unit.alu
+        assert control_unit._get_current_fu() is control_unit.alu
 
     def test_returns_fpu_instance(self, control_unit):
         control_unit.current_fu = "fpu"
-        assert control_unit.get_current_fu() is control_unit.fpu
+        assert control_unit._get_current_fu() is control_unit.fpu
 
     def test_unknown_fu_raises_value_error(self, control_unit):
         control_unit.current_fu = "not_a_real_fu"
         with pytest.raises(ValueError):
-            control_unit.get_current_fu()
+            control_unit._get_current_fu()
 
 
 # ---------------------------------------------------------------------------
@@ -158,7 +158,7 @@ class TestValidOperandCount:
         control_unit.op1.set("rax", 1, 0, 8)
         control_unit.op2.set("rbx", 1, 1, 8)  # both valid -> count 2, matches expected 2
 
-        assert control_unit.valid_operand_count() is True
+        assert control_unit._valid_operand_count() is True
 
     def test_mismatched_operand_count_returns_false(self, control_unit, instructions_patch):
         instructions_patch({"alu": {"add": 2}})
@@ -167,7 +167,7 @@ class TestValidOperandCount:
         control_unit.op1.set("rax", 1, 0, 8)
         control_unit.op2.clear()  # only 1 valid operand, expected 2
 
-        assert control_unit.valid_operand_count() is False
+        assert control_unit._valid_operand_count() is False
 
     def test_zero_operand_instruction(self, control_unit, instructions_patch):
         instructions_patch({"data_path": {"ret": 0}})
@@ -176,7 +176,7 @@ class TestValidOperandCount:
         control_unit.op1.clear()
         control_unit.op2.clear()
 
-        assert control_unit.valid_operand_count() is True
+        assert control_unit._valid_operand_count() is True
 
 
 # ---------------------------------------------------------------------------
@@ -191,7 +191,7 @@ class TestFetch:
         control_unit.labels = {"my_label": 0}
         control_unit.rip = 0
 
-        control_unit.fetch()  # should return without raising or setting instruction
+        control_unit._fetch()  # should return without raising or setting instruction
 
         control_unit.instruction_parser.parse.assert_not_called()
 
@@ -202,7 +202,7 @@ class TestFetch:
         control_unit.op1.set("rax", 1, 0, 8)
         control_unit.op2.set("rbx", 1, 1, 8)  # so valid_operand_count() passes
 
-        control_unit.fetch()
+        control_unit._fetch()
 
         assert control_unit.current_instruction == "add"
         assert control_unit.current_fu == "alu"
@@ -214,7 +214,7 @@ class TestFetch:
         control_unit.rip = 0
 
         with pytest.raises(SystemExit) as exc_info:
-            control_unit.fetch()
+            control_unit._fetch()
 
         assert exc_info.value.code == ExitCode.SOFTWARE_ERROR
 
@@ -224,7 +224,7 @@ class TestFetch:
         control_unit.rip = 0
 
         with pytest.raises(ValueError):
-            control_unit.fetch()
+            control_unit._fetch()
 
     def test_invalid_operand_count_exits(self, control_unit, instructions_patch):
         instructions_patch({"alu": {"add": 2}})
@@ -234,7 +234,7 @@ class TestFetch:
         control_unit.op2.clear()  # only 1 valid operand, expected 2
 
         with pytest.raises(SystemExit) as exc_info:
-            control_unit.fetch()
+            control_unit._fetch()
 
         assert exc_info.value.code == ExitCode.INVALID_INSTRUCTION_SYNTAX
         # op1/op2 should have been cleared on the invalid-count path
@@ -248,7 +248,7 @@ class TestFetch:
         control_unit.instruction_parser.parse.side_effect = SyntaxError("bad syntax")
 
         with pytest.raises(SystemExit) as exc_info:
-            control_unit.fetch()
+            control_unit._fetch()
 
         assert exc_info.value.code == ExitCode.INVALID_INSTRUCTION_SYNTAX
 
@@ -259,7 +259,7 @@ class TestFetch:
         control_unit.instruction_parser.parse.side_effect = ValueError("bad value")
 
         with pytest.raises(SystemExit) as exc_info:
-            control_unit.fetch()
+            control_unit._fetch()
 
         assert exc_info.value.code == ExitCode.INVALID_INSTRUCTION_SYNTAX
 
@@ -274,7 +274,7 @@ class TestExecute:
         control_unit.current_fu = "cpu"
         control_unit.syscall.syscall.return_value = 0
 
-        control_unit.execute("syscall")
+        control_unit._execute("syscall")
 
         control_unit.syscall.syscall.assert_called_once()
 
@@ -283,7 +283,7 @@ class TestExecute:
         control_unit.syscall.syscall.return_value = -1
 
         with pytest.raises(SystemExit) as exc_info:
-            control_unit.execute("syscall")
+            control_unit._execute("syscall")
 
         assert exc_info.value.code == ExitCode.INVALID_SYSCALL
 
@@ -292,7 +292,7 @@ class TestExecute:
         control_unit.alu.execute.return_value = None
         control_unit.rip = 5
 
-        control_unit.execute("add")
+        control_unit._execute("add")
 
         control_unit.alu.load_values.assert_called_once_with("add", control_unit.op1, control_unit.op2)
         control_unit.alu.execute.assert_called_once()
@@ -302,7 +302,7 @@ class TestExecute:
         control_unit.current_fu = "fpu"
         control_unit.fpu.execute.return_value = None
 
-        control_unit.execute("fadd")
+        control_unit._execute("fadd")
 
         control_unit.fpu.load_values.assert_called_once_with("fadd", control_unit.op1, control_unit.op2)
         control_unit.fpu.execute.assert_called_once()
@@ -312,7 +312,7 @@ class TestExecute:
         control_unit.rip = 42
         control_unit.data_path.execute.return_value = None
 
-        control_unit.execute("call")
+        control_unit._execute("call")
 
         control_unit.data_path.load_rip.assert_called_once_with(42)
         control_unit.data_path.load_values.assert_called_once_with("call", control_unit.op1, control_unit.op2)
@@ -321,7 +321,7 @@ class TestExecute:
         control_unit.current_fu = "data_path"
         control_unit.data_path.execute.return_value = None
 
-        control_unit.execute("jmp")
+        control_unit._execute("jmp")
 
         control_unit.data_path.load_rip.assert_not_called()
 
@@ -330,7 +330,7 @@ class TestExecute:
         control_unit.rip = 10
         control_unit.data_path.execute.return_value = 99  # e.g. a jump target
 
-        control_unit.execute("jmp")
+        control_unit._execute("jmp")
 
         assert control_unit.rip == 99
 
@@ -339,7 +339,7 @@ class TestExecute:
         control_unit.alu.execute.side_effect = RuntimeError("bad op")
 
         with pytest.raises(SystemExit) as exc_info:
-            control_unit.execute("add")
+            control_unit._execute("add")
 
         assert exc_info.value.code == ExitCode.INVALID_INSTRUCTION_SYNTAX
 
@@ -358,7 +358,7 @@ class TestStep:
         control_unit.op2.set("rbx", 1, 1, 8)
         control_unit.alu.execute.return_value = None
 
-        control_unit.step()
+        control_unit._step()
 
         assert control_unit.rip == 1  # advanced past the executed instruction
 
@@ -367,7 +367,7 @@ class TestStep:
         control_unit.rip = 0
 
         with pytest.raises(SystemExit) as exc_info:
-            control_unit.step()
+            control_unit._step()
 
         assert exc_info.value.code == 100
 
@@ -377,7 +377,7 @@ class TestStep:
         control_unit.labels = {"my_label": 0}
         control_unit.rip = 0
 
-        control_unit.step()
+        control_unit._step()
 
         control_unit.alu.execute.assert_not_called()
         control_unit.fpu.execute.assert_not_called()
@@ -390,7 +390,7 @@ class TestStep:
         control_unit.rip = 0
 
         with pytest.raises(SystemExit) as exc_info:
-            control_unit.step()
+            control_unit._step()
 
         assert exc_info.value.code == 1
 
@@ -424,7 +424,7 @@ class TestRun:
         # method (monkeypatch.setattr(control_unit, "step", ...)) is not
         # possible — there's no per-instance __dict__ to shadow the class
         # attribute. Patch the class method instead.
-        monkeypatch.setattr(Control_Unit, "step", fake_step)
+        monkeypatch.setattr(Control_Unit, "_step", fake_step)
 
         control_unit.run()
 
@@ -437,7 +437,7 @@ class TestRun:
         def fake_step(self):
             self.finished = True
 
-        monkeypatch.setattr(Control_Unit, "step", fake_step)
+        monkeypatch.setattr(Control_Unit, "_step", fake_step)
 
         control_unit.run()
 
@@ -452,8 +452,8 @@ class TestRun:
             debug_called["called"] = True
             self.finished = True
 
-        monkeypatch.setattr(Control_Unit, "execute_state_command", fake_debug)
-        monkeypatch.setattr(Control_Unit, "step", lambda self: None)
+        monkeypatch.setattr(Control_Unit, "_execute_state_command", fake_debug)
+        monkeypatch.setattr(Control_Unit, "_step", lambda self: None)
 
         control_unit.run()
 
@@ -466,7 +466,7 @@ class TestRun:
         def raising_step(self):
             raise RuntimeError("something went wrong")
 
-        monkeypatch.setattr(Control_Unit, "step", raising_step)
+        monkeypatch.setattr(Control_Unit, "_step", raising_step)
 
         control_unit.run()  # must not propagate the exception
 
@@ -482,7 +482,7 @@ class TestRun:
 class TestPrintSection:
 
     def test_empty_section_prints_placeholder(self, control_unit, capsys):
-        control_unit.print_section({})
+        control_unit._print_section({})
 
         captured = capsys.readouterr()
         assert "(empty section)" in captured.out
@@ -505,7 +505,7 @@ class TestPrintSection:
 
         control_unit.memory.read_bytes.side_effect = fake_read_bytes
 
-        control_unit.print_section(section)
+        control_unit._print_section(section)
 
         captured = capsys.readouterr()
         assert "positive_var: 100" in captured.out
@@ -526,7 +526,7 @@ class TestPrintSection:
             lambda addr, size: bytes(store.get(addr + i, 0) for i in range(size))
         )
 
-        control_unit.print_section(section)
+        control_unit._print_section(section)
 
         captured = capsys.readouterr()
         lines = [l for l in captured.out.strip().split("\n") if l]

@@ -39,7 +39,7 @@ def data_path(mock_registers, mock_memory, mock_labels):
 def create_mock_operand(is_valid=True, type_=1, address=0x1000, size=8, expression="rax", is_high=False, is_signed=False):
     op = Mock()
     op.is_valid.return_value = is_valid
-    op.type = type_          # 1: Register, 2: Memory, 3: Immediate
+    op.type = type_          # 0: Memory, 1: Register, 2: Immediate
     op.address = address
     op.size = size
     op.expression = expression
@@ -81,25 +81,25 @@ class TestValidations:
 
     def test_validate_lea_success(self, data_path):
         data_path.op1 = create_mock_operand(type_=1)  # Register
-        data_path.op2 = create_mock_operand(type_=2)  # Memory
+        data_path.op2 = create_mock_operand(type_=0)  # Memory
         data_path.opcode = 0
         data_path.validate_data_path_instruction()  # Should not raise
 
     def test_validate_lea_invalid_dest(self, data_path):
-        data_path.op1 = create_mock_operand(type_=2)  # Memory instead of Register
-        data_path.op2 = create_mock_operand(type_=2)
+        data_path.op1 = create_mock_operand(type_=0)  # Memory instead of Register
+        data_path.op2 = create_mock_operand(type_=0)
         with pytest.raises(SyntaxError, match="destination operand for LEA must be a register"):
             data_path.validate_lea_conditions()
 
     def test_validate_mov_rodata_write(self, data_path):
-        data_path.op1 = create_mock_operand(type_=2, address=0x400000)  # Address < 0x600000
+        data_path.op1 = create_mock_operand(type_=0, address=0x400000)  # Address < 0x600000
         data_path.op2 = create_mock_operand(type_=1)
         with pytest.raises(SyntaxError, match="read-only memory"):
             data_path.validate_mov_conditions()
 
     def test_validate_mov_mem_to_mem(self, data_path):
-        data_path.op1 = create_mock_operand(type_=2, address=0x700000)
-        data_path.op2 = create_mock_operand(type_=2, address=0x800000)
+        data_path.op1 = create_mock_operand(type_=0, address=0x700000)
+        data_path.op2 = create_mock_operand(type_=0, address=0x800000)
         with pytest.raises(SyntaxError, match="cannot both be memory addresses"):
             data_path.validate_mov_conditions()
 
@@ -153,8 +153,8 @@ class TestDataExecution:
         mock_registers.write_reg.assert_called_once_with("rax", 1234)
 
     def test_execute_mov_imm_to_mem(self, data_path, mock_memory):
-        data_path.op1 = create_mock_operand(type_=2, address=0x700000, size=4)
-        data_path.op2 = create_mock_operand(type_=3, address=0xFF)  # Immediate 0xFF
+        data_path.op1 = create_mock_operand(type_=0, address=0x700000, size=4)
+        data_path.op2 = create_mock_operand(type_=2, address=0xFF)  # Immediate 0xFF
 
         data_path.execute_mov()
 
@@ -195,17 +195,16 @@ class TestControlFlow:
         
         target_pc = data_path.execute_call()
 
-        # Call should push target return address (rip + 1 = 11) as UTF-8 bytes b"11"
-        mock_memory.push.assert_called_once_with(b"11")
+        mock_memory.push.assert_called_once_with((10).to_bytes(8, "little"))
         assert target_pc == 500
         assert data_path.rip == 500
 
         # Setup Ret
-        mock_memory.pop.return_value = b"11"
+        mock_memory.pop.return_value = (10).to_bytes(8, "little")
         ret_pc = data_path.execute_ret()
 
-        assert ret_pc == 11
-        assert data_path.rip == 11
+        assert ret_pc == 10
+        assert data_path.rip == 10
 
     def test_execute_je_taken_mutates_rip(self, data_path, mock_registers):
         mock_registers.read_zero.return_value = True
