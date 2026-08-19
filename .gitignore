@@ -27,3 +27,6 @@ program_cache/
 
 # pip specific
 *.egg-info/
+
+# Releases
+dist
