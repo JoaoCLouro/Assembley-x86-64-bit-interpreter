@@ -71,8 +71,8 @@ class AsmResult:
         import importlib.util
         _exit_codes_path = os.path.join(PROJECT_ROOT, "interpreter", "exit_codes.py")
         _spec = importlib.util.spec_from_file_location("_exit_codes_direct", _exit_codes_path)
-        _exit_codes_module = importlib.util.module_from_spec(_spec)
-        _spec.loader.exec_module(_exit_codes_module)
+        _exit_codes_module = importlib.util.module_from_spec(_spec) # type: ignore
+        _spec.loader.exec_module(_exit_codes_module) # type: ignore
         ExitCode = _exit_codes_module.ExitCode
 
         self.returncode = returncode
