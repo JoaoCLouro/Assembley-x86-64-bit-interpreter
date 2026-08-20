@@ -35,6 +35,21 @@ def _find_project_root(start_dir: str) -> str:
 
 PROJECT_ROOT = _find_project_root(os.path.dirname(os.path.abspath(__file__)))
 
+if PROJECT_ROOT not in sys.path:
+    sys.path.insert(0, PROJECT_ROOT)
+
+# NOTE: ExitCode is deliberately NOT imported at module level here. Doing
+# so pulls in the full `interpreter` package import chain (interpreter ->
+# control_unit -> alu.py), and alu.py itself does `from conftest import
+# SRC_ROOT` expecting to resolve to the PROJECT ROOT's conftest.py. Since
+# this file is ALSO named conftest.py and would still be mid-import at
+# that point, Python resolves the bare `conftest` name to THIS
+# partially-initialized module instead - which has no SRC_ROOT - causing
+# an ImportError. Deferring the import into AsmResult.__init__ (called
+# only once tests are actually running, well after pytest has already
+# fully loaded the root conftest.py under the same bare name) sidesteps
+# the collision entirely.
+
 _SRC_ROOT = os.path.join(PROJECT_ROOT, "interpreter", "_src")
 _LIBREG_PATH = os.path.join(_SRC_ROOT, "lib", "libreg.so")
 _LIBMMU_PATH = os.path.join(_SRC_ROOT, "lib", "libmmu.so")
@@ -53,25 +68,49 @@ class AsmResult:
     """Wraps the outcome of running one .asm file through the interpreter."""
 
     def __init__(self, returncode: int, stdout: str, stderr: str):
+        import importlib.util
+        _exit_codes_path = os.path.join(PROJECT_ROOT, "interpreter", "exit_codes.py")
+        _spec = importlib.util.spec_from_file_location("_exit_codes_direct", _exit_codes_path)
+        _exit_codes_module = importlib.util.module_from_spec(_spec)
+        _spec.loader.exec_module(_exit_codes_module)
+        ExitCode = _exit_codes_module.ExitCode
+
         self.returncode = returncode
         self.raw_stdout = stdout
         self.stderr = stderr
 
         self.program_output = stdout
         self.state = None
+        self.exit_code = None
 
-        marker = "__STATE__"
-        idx = stdout.find(marker)
+        exit_marker = "__EXIT_CODE__"
+        state_marker = "__STATE__"
+
+        idx = stdout.find(exit_marker)
         if idx != -1:
             self.program_output = stdout[:idx]
-            json_part = stdout[idx + len(marker):].strip().splitlines()[0]
+            rest = stdout[idx + len(exit_marker):].strip().splitlines()[0]
+            if rest == "None":
+                self.exit_code = None
+            else:
+                raw = int(rest)
+                try:
+                    self.exit_code = ExitCode(raw)
+                except ValueError:
+                    self.exit_code = raw
+
+        idx = stdout.find(state_marker)
+        if idx != -1:
+            if self.exit_code is None:
+                self.program_output = stdout[:idx]
+            json_part = stdout[idx + len(state_marker):].strip().splitlines()[0]
             self.state = json.loads(json_part)
 
     @property
     def registers(self) -> dict:
         assert self.state is not None, (
             f"No state was captured (process may have crashed before "
-            f"reaching the exit syscall). stderr:\n{self.stderr}"
+            f"finishing). stderr:\n{self.stderr}"
         )
         return self.state
 

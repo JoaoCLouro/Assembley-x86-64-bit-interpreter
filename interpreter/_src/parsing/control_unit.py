@@ -96,7 +96,7 @@ class Control_Unit:
                 self.finished = True
             except SystemExit as e:
                 print(f"Exit due to {e}")
-                return e # type: ignore
+                return e.code # type: ignore
         return ExitCode.SUCCESS
 
     def get_state(self, section: str) -> dict[str, int]:

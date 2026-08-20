@@ -28,9 +28,10 @@ class Data_Memory:
     STACK_START = 0x7fffffffe000
     STACK_LIMIT: int = 0xe000000000  # Arbitrary lower limit for stack growth to prevent overflow
 
-    __slots__ = ['start', 'registers', 'lib', 'table']
+    __slots__ = ['start', 'registers', 'lib', 'table', '_cleaned']
 
     def __init__(self, registers: Registers_Interface, memory_base: int = RODATA_BASE) -> None:
+        self._cleaned = False
         self.start: int = memory_base
         self.registers = registers
 
@@ -73,7 +74,10 @@ class Data_Memory:
         """
         Calls the cleaning routine from the memory_eng.c to free memory
         """
+        if getattr(self, "_cleaned", False):
+            return
         self.lib.free_table(self.table)
+        self._cleaned = True
 
     # ------------------------
     # Read and write methods

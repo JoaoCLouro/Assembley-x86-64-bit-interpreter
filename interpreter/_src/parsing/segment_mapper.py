@@ -91,7 +91,6 @@ class Segment_Mapper:
 
 
         self.exit_status: ExitCode = ExitCode.SUCCESS
-        
         self._load_program(self.file_name)
         try:
             self._load_text()

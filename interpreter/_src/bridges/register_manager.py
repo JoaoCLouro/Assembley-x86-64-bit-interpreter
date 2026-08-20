@@ -23,9 +23,10 @@ class Registers_Interface:
     EXTENDED_8BIT = {"sil": "rsi", "dil": "rdi", "bpl": "rbp", "spl": "rsp"}
 
     # Class attributes for the library and the pointer to the registers structure in c
-    __slots__ = ["lib", "regs"]
+    __slots__ = ["lib", "regs", "_cleaned"]
 
     def __init__(self) -> None:
+        self._cleaned = False
         # Load the library compiled
         # lib/ lives at the project root, one directory up from this file (bridges/)
         _base_dir = os.path.dirname(os.path.abspath(__file__))
@@ -36,9 +37,6 @@ class Registers_Interface:
         # -------------------------------
         # Define C return and args types
         # -------------------------------
-        # NOTE: restype/argtypes must be configured BEFORE any call is made,
-        # otherwise ctypes falls back to the default int return type, which
-        # truncates pointers on 64-bit systems.
 
         self.lib.CPURegs_create.restype = ctypes.c_void_p
         self.lib.CPURegs_free.argtypes = [ctypes.c_void_p]
@@ -117,9 +115,12 @@ class Registers_Interface:
 
     def clean(self) -> None:
         """
-        Cleans the register structure from memory
+        Cleans the register structure from memory.
         """
+        if getattr(self, "_cleaned", False):
+            return
         self.lib.CPURegs_free(self.regs)
+        self._cleaned = True
 
     #------------------
     # Register Writing
