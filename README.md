@@ -355,6 +355,8 @@ The application returns the following exit codes to indicate success or specific
 
 ### Planned improvement
 
+- Implement multiplication and division as well as logical and arithmetic shifting
+
 - Implement FPU operations and logic operations not yet available (rotations and shifts);
 
 - Reinforcing the syscall's supported by the program;
