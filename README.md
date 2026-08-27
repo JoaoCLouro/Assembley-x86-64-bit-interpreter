@@ -1,4 +1,5 @@
 # Assembly x86 64 bit python Interpreter
+
 A simple assembly x86 64-bit interpreter with sequential execution and error detection.
 
 
@@ -245,50 +246,55 @@ Reading will always take a start address and a number of bytes to read. This met
 
 ### Allowed declarations
 
-- All type of allowed declarations for a standard compiler for the .rodata, .data and .bss sections are allowed.
+In the broadest terms possibly **all nasm supported syntax for the implemented operations is supported**. The only (known) exception to this are the multiplication and division operation in which only 1 operand declarations are supported.
+
+#### Useful declaration syntax guide lines
+
+For more clarification on specific supported declarations syntax or preferred syntax:
 
 - Immediate/variable numerical values should be always declared using either binary, decimal or hexadecimal numeration.
 
 - "times" directive use is only allowed following a specific syntax:
-    - All "times" declarations must follow the structure:
+    All "times" declarations must follow the structure:
 
-        ```asm
-        ; <label>: times <count> <size_specifier> <init_value>
-        buffer: times 10 db 0
-        ```
-        
+    ```asm
+    ; <label>: times <count> <size_specifier> <init_value>
+    buffer: times 10 db 0
+    ```
+
 Constants declarations are a bit more nuanced. Allowed declarations include:
 
-        - Standard declarations:
+- Standard declarations:
 
-            - <constant_uppercased_label> equ: <integer_value>;
-            - <constant_uppercased_label> equ: <string_size_calculation>;
-        
-        - String declarations:
+    * <constant_uppercased_label> equ: <integer_value>;
+    * <constant_uppercased_label> equ: <string_size_calculation>;
 
-            - <constant_uppercased_label> equ: '<character_value>';
-            - <constant_uppercased_label> equ: "<string_value>";
+- String declarations:
 
-        - Standard c constant definitions:
-            - #define <constant_uppercased_label> <value>
+    * <constant_uppercased_label> equ: '<character_value>';
+    * <constant_uppercased_label> equ: "<string_value>";
+
+- Standard c constant definitions:
+    * #define <constant_uppercased_label> <value>
+
 
 ### Operand syntax rules
 
-    - Operands written with different components should have no spaces in between each component of the expression:
+- Operands written with different components should have no spaces in between each component of the expression:
 
-        ex.:
+    ex.:
         - What to avoid: [rbx + 4 * 1] or CONSTANT + 4
         - Correct version: [rbx+4*1]   or CONSTANT+4
 
-    - If an operand is an immediate value it should always be simplified to the maximum extent possible avoiding complex nested parentheses expression:
+- If an operand is an immediate value it should always be simplified to the maximum extent possible avoiding complex nested parentheses expression:
 
-        ex.: 
+    ex.:
         - What to avoid: ((4+3+1)*4 + 6 + (7 + 8)*2)
         - Correct version: 58
 
-    - All immediate values should be integer values (not decimal point values)
+- All immediate values should be integer values (not decimal point values)
 
-        ex.:
+    ex.:
         - What to avoid: mov eax, 3.14
         - Correct version: mov eax, 3
 
@@ -355,8 +361,6 @@ The application returns the following exit codes to indicate success or specific
 ## Roadmap
 
 ### Planned improvement
-
-- Implement multiplication and division as well as logical and arithmetic shifting
 
 - Implement FPU operations and logic operations not yet available (rotations and shifts);
 
