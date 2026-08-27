@@ -203,15 +203,15 @@ The authoritative list lives in `INSTRUCTIONS` (`patter_matching_helpers.py`), o
   | `jnp`, `jpo` | Not Parity / Parity Odd (PF == 0) |
 
 **ALU (`alu.py`):**
-* 2-operand: `cmp`, `add`, `adc`, `sub`, `sbb`, `and`, `or`, `xor`, `xchg`
-* 1-operand: `inc`, `dec`, `not`, `neg`
+
+* 2-operand: `cmp`, `add`, `adc`, `sub`, `sbb`, `and`, `or`, `xor`, `xchg`, `shl`, `sal`, `shr`, `sar`, `rol`, `rcl`, `ror`, `rcr`
+* 1-operand: `inc`, `dec`, `not`, `neg`, `mul`, `imul`, `div`, `idiv`
 
 **FPU (`fpu.py`):**
 * No instructions currently registered (functional unit exists but is not yet wired up — see 5.2).
 
 ### 5.2 Not Yet Supported
 
-* Multiplication/division: `mul`, `imul`, `div`, `idiv`
 * FPU operations (functional unit exists but no instructions are wired up yet)
 
 ### 5.3 Operand Size Inference

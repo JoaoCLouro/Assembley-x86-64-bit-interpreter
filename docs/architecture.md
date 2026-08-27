@@ -8,13 +8,15 @@ This document details the high-level architecture of the Assembly x86-64 Interpr
 
 The interpreter divides responsibilities across language boundaries to maximize both development flexibility and execution accuracy.
 
-### Python's Domain (The Frontend)
-* **Parsing & Lexing:** Reading the `.asm` file, stripping comments, and resolving macros/constants.
+### Python's Domain
+
+* **Parsing & Lexing:** Reading the `.asm` file, stripping comments, and resolving expressions/declarations.
 * **Syntax Validation:** Ensuring operands match expected x86-64 structural rules before execution begins.
 * **Control Flow:** Managing the program counter (instruction pointer) and the main execution loop.
 * **Dispatching:** Routing parsed instructions to their corresponding Functional Units.
 
-### C's Domain (The Backend)
+### C's Domain
+
 * **Hardware State:** Maintaining the exact bit-layout of the 64-bit registers, FPU state, and EFLAGS.
 * **Memory Management:** Simulating a 4-level page table to handle virtual memory mapping and stack bounds.
 * **Opcode Execution:** Performing the actual bitwise and arithmetic operations natively to accurately simulate CPU overflow, carry, and sign conditions.
@@ -82,7 +84,7 @@ Before a single instruction is executed, the interpreter scans the entire file. 
 
 ## 4. Phase 2: Execution (`control_unit.py`)
 
-Once mapping is complete, the `control_unit.py` takes over. It acts as the system clock, driving the fetch-execute cycle until the program issues a termination syscall or reaches the end of the executable section.
+Once mapping is complete, the `control_unit.py` takes over. It acts as the system clock, driving the fetch-execute cycle until the program issues a termination syscall or reaches the end of the executable section (issuing an error exit code at the end).
 
 1. **Fetch**: Retrieves the next instruction string based on the current logical instruction pointer.
 2. **Parse**: Passes the raw string to `instruction_parser.py` to extract the opcode (e.g., mov) and its arguments (e.g., rax, [rbx+4]).

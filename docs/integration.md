@@ -16,7 +16,7 @@ It's made up of two components:
 ## Architecture
 
 ```
-CPU_SIMU/
+Interpreter/
 ├── bridges/                  ← this module
 │   ├── __init__.py
 │   ├── register_manager.py   → Registers_Interface (loads lib/libreg.so)
@@ -36,10 +36,10 @@ CPU_SIMU/
 
 ```
 ┌──────────────────────┐        ctypes         ┌───────────────────────┐
-│  bridges/ (Python)    │  ───────────────────▶ │  lib/*.so (C, compiled │
-│                       │                       │  from execution/)      │
-│ Registers_Interface   │ ── lib/libreg.so ────▶│ CPURegs struct + ops    │
-│ Data_Memory           │ ── lib/libmmu.so ────▶│ page table + ops        │
+│  bridges/ (Python)   │  ───────────────────▶ │  lib/*.so (C, compiled│
+│                      │                        │  from execution/)    │
+│ Registers_Interface  │ ── lib/libreg.so ────▶│ CPURegs struct + ops  │
+│ Data_Memory          │ ── lib/libmmu.so ────▶│ page table + ops      │
 └──────────────────────┘                        └───────────────────────┘
 ```
 
