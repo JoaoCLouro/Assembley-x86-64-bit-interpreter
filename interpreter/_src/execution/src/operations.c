@@ -46,6 +46,18 @@ static void exec_xor(Info *s);
 static void exec_not(Info *s); 
 static void exec_neg(Info *s);
 static void exec_xchg(Info *s);
+static void exec_mul(Info *s);
+static void exec_imul(Info *s);
+static void exec_div(Info *s);
+static void exec_idiv(Info *s);
+static void exec_shl(Info *s);
+static void exec_sal(Info *s);
+static void exec_shr(Info *s);
+static void exec_sar(Info *s);
+static void exec_rol(Info *s);
+static void exec_rcl(Info *s);
+static void exec_ror(Info *s);
+static void exec_rcr(Info *s);
 static void set_result_info(Info *current_state);
 static void commit_operand (Info* current_instruction_state, Operand* op, long long value);
 
@@ -74,8 +86,8 @@ const InstructionHandler dispatch_table[OP_COUNT] = {
     [OP_NOT]  = exec_not,
     [OP_NEG]  = exec_neg,
     [OP_XCHG] = exec_xchg,
-    [OP_MUL]  = exec_mult,
-    [OP_IMUL] = exec_imult,
+    [OP_MUL]  = exec_mul,
+    [OP_IMUL] = exec_imul,
     [OP_DIV]  = exec_div,
     [OP_IDIV] = exec_idiv,
     [OP_SHL]  = exec_shl,
@@ -194,7 +206,7 @@ void clean(Info *s) {
 // Instruction execution functions
 //--------------------------------
 
-void dispatch(Info *s)
+uint8_t dispatch(Info *s)
 {
     Opcode op = s->opcode; 
 
@@ -209,14 +221,19 @@ void dispatch(Info *s)
     set_result_info(s);
     set_operands_values(s);
 
-    uint8_t no_overwrite = op == OP_XCHG || op == OP_CMP;
+    if (op == OP_DIV || op == OP_IDIV)
+    {
+        if (s->op1_value == 0) return 1;
+    }
+
+    uint8_t no_overwrite = op == OP_XCHG || op == OP_CMP || op == OP_MUL || op == OP_IMUL || op == OP_DIV || op == OP_IDIV;
     dispatch_table[op](s);
     if (!no_overwrite)
     {
         commit_operand(s, &s->result, s->res_value);
     }
     clean(s);
-    return;
+    return 0;
 }
 
 // --------------
@@ -248,66 +265,128 @@ static void set_result_info (Info *current_state)
  * 
  * @param s Pointer to the Info structure holding all operand, instruction and results info
  * @param result The result of the operation of the two operands, used to set the flags
+ * @param count The shift/rotate count actually applied (0 for non-shift/rotate opcodes) - needed because CF/OF for these depend on the count itself, not just the before/after values, e.g. CF is "the last bit shifted out" which requires knowing how many bits were shifted.
  */
-static void flags_update(Info *s, unsigned long long result)
+static void flags_update(Info *s, unsigned long long result, unsigned long long count)
 {
     int bit_count = 8 * s->op1.size;
-    int msb_mask = bit_count - 1;
+    int msb_shift = bit_count - 1;
     
     unsigned long long bits_mask = (bit_count >= 64) ? 0xFFFFFFFFFFFFFFFFULL : (1ULL << bit_count) - 1;
     unsigned long long res_msb = result & bits_mask;
+    unsigned long long op1_masked = s->op1_value & bits_mask;
 
     // Arithmetic flags
     uint8_t zero = (uint8_t) (res_msb == 0);
-    uint8_t sign = (uint8_t) ((res_msb >> (bit_count - 1)) & 1);
+    uint8_t sign = (uint8_t) ((res_msb >> msb_shift) & 1);
 
-    // Logical flags
-    uint8_t carry;
-    if (bit_count >= 64) {
-    
-        switch (s->opcode) {
-            case OP_ADD:
-            case OP_ADC:
-                carry = (uint8_t) (result < s->op1_value);
-                break;
-            case OP_SUB:
-            case OP_SBB:
-            case OP_CMP:
-                carry = (uint8_t) (s->op1_value < s->op2_value);
-                break;
-            default:
-                carry = 0;
-        }
-    } else {
-        carry = (uint8_t) ((result >> bit_count) & 1);
+    // Parity Flag (Even parity of the lowest 8 bits)
+    uint8_t pf = 1;
+    uint8_t low_byte = res_msb & 0xFF;
+    for (int i = 0; i < 8; i++) {
+        pf ^= ((low_byte >> i) & 1);
     }
 
-    uint8_t overflow;
+    // Fetch existing flags to preserve untouched state (IF, DF, TF, etc.)
+    uint32_t rflags = read_rflags(s->registers);
+    uint8_t carry = rflags & 1U; // Default to keeping old CF
+    uint8_t overflow = (rflags >> 11) & 1U;
+
     switch (s->opcode) {
         case OP_ADD:
+            carry = (res_msb < (s->op1_value & bits_mask));
+            overflow = (uint8_t) (((s->op1_value ^ res_msb) & (s->op2_value ^ res_msb)) >> msb_shift & 1);
+            break;
         case OP_ADC:
-            // Addition overflow: operands have the SAME sign, but the
-            // result's sign differs from theirs.
-            overflow = (uint8_t) (((s->op1_value ^ result) & (s->op2_value ^ result)) >> msb_mask & 1);
+            carry = (res_msb < (s->op1_value & bits_mask)) || (res_msb == (s->op1_value & bits_mask) && (rflags & 1U));
+            overflow = (uint8_t) (((s->op1_value ^ res_msb) & (s->op2_value ^ res_msb)) >> msb_shift & 1);
             break;
         case OP_SUB:
-        case OP_SBB:
         case OP_CMP:
-            // Subtraction overflow: operands have DIFFERENT signs, and
-            // the result's sign differs from op1's sign.
-            overflow = (uint8_t) (((s->op1_value ^ s->op2_value) & (s->op1_value ^ result)) >> msb_mask & 1);
+            carry = ((s->op1_value & bits_mask) < (s->op2_value & bits_mask));
+            overflow = (uint8_t) (((s->op1_value ^ s->op2_value) & (s->op1_value ^ res_msb)) >> msb_shift & 1);
+            break;
+        case OP_SBB:
+            carry = ((s->op1_value & bits_mask) < (s->op2_value & bits_mask)) || ((s->op1_value & bits_mask) == (s->op2_value & bits_mask) && (rflags & 1U));
+            overflow = (uint8_t) (((s->op1_value ^ s->op2_value) & (s->op1_value ^ res_msb)) >> msb_shift & 1);
+            break;
+        case OP_INC:
+            // CF is untouched. Overflow occurs if changing from 0x7F to 0x80
+            overflow = (res_msb == (1ULL << msb_shift));
+            break;
+        case OP_DEC:
+            // CF is untouched. Overflow occurs if changing from 0x80 to 0x7F
+            overflow = ((s->op1_value & bits_mask) == (1ULL << msb_shift));
+            break;
+        case OP_NEG:
+            carry = ((s->op1_value & bits_mask) != 0);
+            overflow = ((s->op1_value & bits_mask) == (1ULL << msb_shift));
+            break;
+        case OP_AND:
+        case OP_OR:
+        case OP_XOR:
+            carry = 0;
+            overflow = 0;
+            break;
+
+        case OP_SHL:
+        case OP_SAL:
+            if (count >= 1 && count <= (unsigned long long)bit_count) {
+                // CF = last bit shifted out = bit (bit_count - count) of the ORIGINAL value
+                carry = (uint8_t) ((op1_masked >> (bit_count - count)) & 1ULL);
+            }
+            if (count == 1) {
+                // OF = XOR of the two most-significant bits of the result
+                overflow = (uint8_t) (((res_msb >> msb_shift) ^ (res_msb >> (msb_shift - 1))) & 1ULL);
+            }
+            break;
+        case OP_SHR:
+            if (count >= 1 && count <= (unsigned long long)bit_count) {
+                // CF = last bit shifted out = bit (count - 1) of the ORIGINAL value
+                carry = (uint8_t) ((op1_masked >> (count - 1)) & 1ULL);
+            }
+            if (count == 1) {
+                // OF = original MSB (shr always clears the sign bit, so this reflects whether it changed)
+                overflow = (uint8_t) ((op1_masked >> msb_shift) & 1ULL);
+            }
+            break;
+        case OP_SAR:
+            if (count >= 1 && count <= (unsigned long long)bit_count) {
+                carry = (uint8_t) ((op1_masked >> (count - 1)) & 1ULL);
+            }
+            if (count == 1) {
+                // Arithmetic shift right never changes the sign bit, so OF is always 0 for count == 1
+                overflow = 0;
+            }
+            break;
+        case OP_ROL:
+            if (count >= 1) {
+                // CF = LSB of the result (the bit that wrapped around to the front)
+                carry = (uint8_t) (res_msb & 1ULL);
+            }
+            if (count == 1) {
+                overflow = (uint8_t) (carry ^ ((res_msb >> msb_shift) & 1ULL));
+            }
+            break;
+        case OP_ROR:
+            if (count >= 1) {
+                // CF = MSB of the result (the bit that wrapped around to the back)
+                carry = (uint8_t) ((res_msb >> msb_shift) & 1ULL);
+            }
+            if (count == 1) {
+                overflow = (uint8_t) (carry ^ ((res_msb >> (msb_shift - 1)) & 1ULL));
+            }
             break;
         default:
-            overflow = 0;
+            break;
     }
 
-    // More flags can be later implemented as needed
-
-    // Preserving the state of the trap flag as it is not affected by the operations
-    uint8_t trap = (uint8_t) read_trap_flag(s->registers);
-
-    uint32_t rflags_value = (carry << 0) | (zero << 6) | (sign << 7) | (overflow << 11) | (trap << 8);
-    write_rflags(s->registers, rflags_value);
+    // Clear CF(0), PF(2), ZF(6), SF(7), OF(11)
+    rflags &= ~((1U << 0) | (1U << 2) | (1U << 6) | (1U << 7) | (1U << 11));
+    // Apply new values
+    rflags |= (carry << 0) | (pf << 2) | (zero << 6) | (sign << 7) | (overflow << 11);
+    
+    write_rflags(s->registers, rflags);
 }
 
 // -----------------
@@ -405,7 +484,7 @@ static void exec_cmp(Info *s)
     // Need cmp syntax rules check
     unsigned long long result = (unsigned long long) s->op1_value - s->op2_value;
     // Sets flags based on the result
-    flags_update(s, result);
+    flags_update(s, result, 0);
 }
 
 //----------------------
@@ -421,7 +500,7 @@ static void exec_cmp(Info *s)
 static void exec_add(Info *s)
 {
     unsigned long long result = (unsigned long long) s->op1_value + s->op2_value;
-    flags_update(s, result);
+    flags_update(s, result, 0);
     s->res_value = (long long) result;
 }
 
@@ -434,7 +513,7 @@ static void exec_add(Info *s)
 static void exec_adc(Info *s)
 {
     unsigned long long result = (unsigned long long) s->op1_value + s->op2_value + read_carry_flag(s->registers);
-    flags_update(s, result);
+    flags_update(s, result, 0);
     s->res_value = (long long) result;
 }
 
@@ -447,7 +526,7 @@ static void exec_adc(Info *s)
 static void exec_sub(Info *s)
 {
     unsigned long long result = (unsigned long long) s->op1_value - s->op2_value;
-    flags_update(s, result);
+    flags_update(s, result, 0);
     s->res_value = (long long) result;
 }
 
@@ -460,7 +539,7 @@ static void exec_sub(Info *s)
 static void exec_sbb(Info *s)
 {
     unsigned long long result = (unsigned long long) s->op1_value - s->op2_value - read_carry_flag(s->registers);
-    flags_update(s, result);
+    flags_update(s, result, 0);
     s->res_value = (long long) result;
 }
 
@@ -473,7 +552,7 @@ static void exec_sbb(Info *s)
 static void exec_inc(Info *s)
 {
     unsigned long long result = (unsigned long long) s->op1_value + 1;
-    flags_update(s, result);
+    flags_update(s, result, 0);
     s->res_value = (long long) result;
 }
 
@@ -486,7 +565,7 @@ static void exec_inc(Info *s)
 static void exec_dec(Info *s)
 {
     unsigned long long result = (unsigned long long) s->op1_value - 1;
-    flags_update(s, result);
+    flags_update(s, result, 0);
     s->res_value = (long long) result;
 }
 
@@ -499,7 +578,7 @@ static void exec_dec(Info *s)
 static void exec_and(Info *s)
 {
     unsigned long long result = (unsigned long long) s->op1_value & s->op2_value;
-    flags_update(s, result);
+    flags_update(s, result, 0);
     s->res_value = (long long) result;
 }
 
@@ -512,7 +591,7 @@ static void exec_and(Info *s)
 static void exec_or(Info *s)
 {
     unsigned long long result = (unsigned long long) s->op1_value | s->op2_value;
-    flags_update(s, result);
+    flags_update(s, result, 0);
     s->res_value = (long long) result;
 }
 
@@ -525,7 +604,7 @@ static void exec_or(Info *s)
 static void exec_xor(Info *s)
 {
     unsigned long long result = (unsigned long long) s->op1_value ^ s->op2_value;
-    flags_update(s, result);
+    flags_update(s, result, 0);
     s->res_value = (long long) result;
 }
 
@@ -538,7 +617,7 @@ static void exec_xor(Info *s)
 static void exec_not(Info *s)
 {
     unsigned long long result = (unsigned long long) ~s->op1_value;
-    flags_update(s, result);
+    flags_update(s, result, 0);
     s->res_value = (long long) result;
 }
 
@@ -551,7 +630,7 @@ static void exec_not(Info *s)
 static void exec_neg(Info *s)
 {
     unsigned long long result = (unsigned long long) -s->op1_value;
-    flags_update(s, result);
+    flags_update(s, result, 0);
     s->res_value = (long long) result;
 }
 
@@ -571,26 +650,351 @@ static void exec_xchg(Info *s)
     commit_operand(s, &s->op2, val1);
 }
 
-static void exec_mult(Info *s){}
 
-static void exec_imult(Info *s) {}
+/**
+ * @brief Executes unsigned multiplication of AL/AX/EAX/RAX by the first operand.
+ * 
+ * @param s Pointer to the Info structure holding all operand, instruction and results info
+ * @warning Results are written implicitly across RAX and RDX (or AX) based on operand size
+ */
+static void exec_mul(Info *s)
+{
+    uint8_t size = s->op1.size;
+    unsigned long long rax_val = read_8b_reg(s->registers, 0); // RAX
+    unsigned long long src = s->op1_value;
+    uint8_t cf_of = 0;
 
-static void exec_div(Info *s) {}
+    if (size == 1)
+    {
+        unsigned short res = (uint8_t)rax_val * (uint8_t)src;
+        write_reg(s->registers, 0, res, 2, 0); // AX
+        cf_of = ((res & 0xFF00) != 0);
+    } else if (size == 2)
+    {
+        unsigned int res = (uint16_t)rax_val * (uint16_t)src;
+        write_reg(s->registers, 0, res & 0xFFFF, 2, 0);         // AX
+        write_reg(s->registers, 3, (res >> 16) & 0xFFFF, 2, 0); // DX
+        cf_of = ((res & 0xFFFF0000) != 0);
+    } else if (size == 4)
+    {
+        unsigned long long res = (uint32_t)rax_val * (uint64_t)(uint32_t)src;
+        write_reg(s->registers, 0, res & 0xFFFFFFFFULL, 4, 0);          // EAX
+        write_reg(s->registers, 3, (res >> 32) & 0xFFFFFFFFULL, 4, 0);  // EDX
+        cf_of = ((res >> 32) != 0);
+    } else
+    { // 64-bit
+        __uint128_t res = (__uint128_t)rax_val * (__uint128_t)src;
+        write_reg(s->registers, 0, (unsigned long long)res, 8, 0);          // RAX
+        write_reg(s->registers, 3, (unsigned long long)(res >> 64), 8, 0);  // RDX 
+        cf_of = ((res >> 64) != 0);
+    }
 
-static void exec_idiv(Info *s) {}
+    uint32_t rflags = read_rflags(s->registers);
+    rflags &= ~((1U << 0) | (1U << 11));
+    rflags |= (cf_of << 0) | (cf_of << 11);
+    write_rflags(s->registers, rflags);
+}
 
-static void exec_shl(Info *s) {}
+/**
+ * @brief Executes signed multiplication in single-operand form.
+ * 
+ * @param s Pointer to the Info structure holding all operand, instruction and results info
+ * @warning Return value is written implicitly to RAX/RDX
+ */
+static void exec_imul(Info *s)
+{
+    uint8_t size = s->op1.size;
 
-static void exec_sal(Info * s) {}
+    long long rax_val = (long long)read_8b_reg(s->registers, 0); // RAX
+    long long src = (long long)s->op1_value;
+    uint8_t cf_of = 0;
 
-static void exec_shr(Info *s) {}
+    if (size == 1) {
+        short res = (int8_t)rax_val * (int8_t)src;
+        write_reg(s->registers, 0, (unsigned short)res, 2, 0); // AX
+        cf_of = (res != (int8_t)res);
+    } else if (size == 2) {
+        int res = (int16_t)rax_val * (int16_t)src;
+        write_reg(s->registers, 0, (unsigned short)(res & 0xFFFF), 2, 0);         // AX
+        write_reg(s->registers, 3, (unsigned short)((res >> 16) & 0xFFFF), 2, 0); // DX
+        cf_of = (res != (int16_t)res);
+    } else if (size == 4) {
+        long long res = (int32_t)rax_val * (long long)(int32_t)src;
+        write_reg(s->registers, 0, (unsigned int)(res & 0xFFFFFFFFLL), 4, 0);          // EAX
+        write_reg(s->registers, 3, (unsigned int)((res >> 32) & 0xFFFFFFFFLL), 4, 0);  // EDX
+        cf_of = (res != (int32_t)res);
+    } else {
+        __int128 res = (__int128)rax_val * (__int128)src;
+        write_reg(s->registers, 0, (unsigned long long)res, 8, 0);          // RAX
+        write_reg(s->registers, 3, (unsigned long long)(res >> 64), 8, 0);  // RDX
+        cf_of = (res != (int64_t)res);
+    }
 
-static void exec_sar(Info * s) {}
+    // Update CF and OF only
+    uint32_t rflags = read_rflags(s->registers);
+    rflags &= ~((1U << 0) | (1U << 11));
+    rflags |= (cf_of << 0) | (cf_of << 11);
+    write_rflags(s->registers, rflags);
+}
 
-static void exec_rol(Info *s) {}
+/**
+ * @brief Executes unsigned division of RDX : RAX (or AX) by the first operand.
+ * 
+ * @param s Pointer to the Info structure holding all operand, instruction and results info
+ * @warning Quotient is stored in RAX (or AL) and remainder in RDX (or AH)
+ */
+static void exec_div(Info *s)
+{
+    uint8_t size = s->op1.size;
+    unsigned long long divisor = s->op1_value;
+    if (divisor == 0) return; // Prevent divide by zero
 
-static void exec_rcl(Info * s) {}
+    if (size == 1)
+    {
+        unsigned short dividend = (unsigned short)read_2b_reg(s->registers, 0); // AX
+        uint8_t quot = dividend / divisor;
+        uint8_t rem = dividend % divisor;
+        write_reg(s->registers, 0, quot, 1, 0); // AL
+        write_reg(s->registers, 0, rem, 1, 1);  // AH
+    } else if (size == 2)
+    {
+        unsigned int dividend = ((uint32_t)read_2b_reg(s->registers, 3) << 16) | read_2b_reg(s->registers, 0); // DX:AX
+        uint16_t quot = dividend / divisor;
+        uint16_t rem = dividend % divisor;
+        write_reg(s->registers, 0, quot, 2, 0); // AX
+        write_reg(s->registers, 3, rem, 2, 0);  // DX
+    } else if (size == 4)
+    {
+        unsigned long long dividend = ((uint64_t)read_4b_reg(s->registers, 3) << 32) | read_4b_reg(s->registers, 0); // EDX:EAX
+        uint32_t quot = dividend / divisor;
+        uint32_t rem = dividend % divisor;
+        write_reg(s->registers, 0, quot, 4, 0); // EAX
+        write_reg(s->registers, 3, rem, 4, 0);  // EDX
+    } else
+    {
+        __uint128_t dividend = ((__uint128_t)read_8b_reg(s->registers, 3) << 64) | read_8b_reg(s->registers, 0); // RDX:RAX
+        uint64_t quot = dividend / divisor;
+        uint64_t rem = dividend % divisor;
+        write_reg(s->registers, 0, quot, 8, 0); // RAX
+        write_reg(s->registers, 3, rem, 8, 0);  // RDX
+    }
+}
 
-static void exec_ror(Info *s) {}
+/**
+ * @brief Executes signed division of RDX:RAX (or AX) by the first operand.
+ * 
+ * @param s Pointer to the Info structure holding all operand, instruction and results info
+ * @warning Quotient is stored in RAX (or AL) and remainder in RDX (or AH)
+ */
+static void exec_idiv(Info *s)
+{
+    uint8_t size = s->op1.size;
+    long long divisor = (long long)s->op1_value;
+    if (size == 1) divisor = (int8_t)divisor;
+    else if (size == 2) divisor = (int16_t)divisor;
+    else if (size == 4) divisor = (int32_t)divisor;
 
-static void exec_rcr(Info * s) {}
+    if (divisor == 0) return;
+
+    if (size == 1) {
+        short dividend = (short)read_2b_reg(s->registers, 0);
+        int8_t quot = dividend / divisor;
+        int8_t rem = dividend % divisor;
+        write_reg(s->registers, 0, (uint8_t)quot, 1, 0);
+        write_reg(s->registers, 0, (uint8_t)rem, 1, 1);
+    } else if (size == 2) {
+        int dividend = ((int)read_2b_reg(s->registers, 3) << 16) | read_2b_reg(s->registers, 0);
+        int16_t quot = dividend / divisor;
+        int16_t rem = dividend % divisor;
+        write_reg(s->registers, 0, (uint16_t)quot, 2, 0);
+        write_reg(s->registers, 3, (uint16_t)rem, 2, 0);
+    } else if (size == 4) {
+        long long dividend = ((long long)read_4b_reg(s->registers, 3) << 32) | read_4b_reg(s->registers, 0);
+        int32_t quot = dividend / divisor;
+        int32_t rem = dividend % divisor;
+        write_reg(s->registers, 0, (uint32_t)quot, 4, 0);
+        write_reg(s->registers, 3, (uint32_t)rem, 4, 0);
+    } else {
+        __int128 dividend = ((__int128)read_8b_reg(s->registers, 3) << 64) | read_8b_reg(s->registers, 0);
+        int64_t quot = dividend / divisor;
+        int64_t rem = dividend % divisor;
+        write_reg(s->registers, 0, (uint64_t)quot, 8, 0);
+        write_reg(s->registers, 3, (uint64_t)rem, 8, 0);
+    }
+}
+
+/**
+ * @brief Executes logical shift left on the destination operand by the count in op2.
+ * 
+ * @param s Pointer to the Info structure holding all operand, instruction and results info
+ */
+static void exec_shl(Info *s)
+{
+    uint8_t size = s->op1.size;
+    int bit_count = size * 8;
+    unsigned long long mask = (size >= 8) ? 0xFFFFFFFFFFFFFFFFULL : (1ULL << bit_count) - 1ULL;
+    unsigned long long count = s->op2_value & 0x3F;
+
+    if (count == 0) return;
+
+    unsigned long long result = (s->op1_value << count) & mask;
+    flags_update(s, result, count);
+    s->res_value = (long long)result;
+}
+
+/**
+ * @brief Executes arithmetic shift left on the destination operand (identical to SHL).
+ * 
+ * @param s Pointer to the Info structure holding all operand, instruction and results info
+ */
+static void exec_sal(Info *s)
+{
+    exec_shl(s);
+}
+
+/**
+ * @brief Executes logical shift right on the destination operand by the count in op2.
+ * 
+ * @param s Pointer to the Info structure holding all operand, instruction and results info
+ */
+static void exec_shr(Info *s)
+{
+    uint8_t size = s->op1.size;
+    int bit_count = size * 8;
+    unsigned long long mask = (size >= 8) ? 0xFFFFFFFFFFFFFFFFULL : (1ULL << bit_count) - 1ULL;
+    unsigned long long count = s->op2_value & 0x3F;
+
+    if (count == 0) return;
+
+    unsigned long long val = s->op1_value & mask;
+    unsigned long long result = val >> count;
+    flags_update(s, result, count);
+    s->res_value = (long long)result;
+}
+
+/**
+ * @brief Executes arithmetic shift right on the destination operand, preserving the sign bit.
+ * 
+ * @param s Pointer to the Info structure holding all operand, instruction and results info
+ */
+static void exec_sar(Info *s)
+{
+    uint8_t size = s->op1.size;
+    int bit_count = size * 8;
+    unsigned long long mask = (size >= 8) ? 0xFFFFFFFFFFFFFFFFULL : (1ULL << bit_count) - 1ULL;
+    unsigned long long count = s->op2_value & 0x3F;
+
+    if (count == 0) return;
+
+    long long sval = (long long)s->op1_value;
+    if (size == 1) sval = (int8_t)sval;
+    else if (size == 2) sval = (int16_t)sval;
+    else if (size == 4) sval = (int32_t)sval;
+
+    long long sres = sval >> count;
+    unsigned long long result = ((unsigned long long)sres) & mask;
+    flags_update(s, result, count);
+    s->res_value = (long long)result;
+}
+
+/**
+ * @brief Executes bitwise rotate left on the destination operand by the count in op2.
+ * 
+ * @param s Pointer to the Info structure holding all operand, instruction and results info
+ */
+static void exec_rol(Info *s)
+{
+    uint8_t size = s->op1.size;
+    int bit_count = size * 8;
+    unsigned long long mask = (size >= 8) ? 0xFFFFFFFFFFFFFFFFULL : (1ULL << bit_count) - 1ULL;
+    unsigned long long count = s->op2_value % bit_count;
+
+    if (count == 0) return;
+
+    unsigned long long val = s->op1_value & mask;
+    unsigned long long result = ((val << count) | (val >> (bit_count - count))) & mask;
+    flags_update(s, result, count);
+    s->res_value = (long long)result;
+}
+
+/**
+ * @brief Executes bitwise rotate right on the destination operand by the count in op2.
+ * 
+ * @param s Pointer to the Info structure holding all operand, instruction and results info
+ */
+static void exec_ror(Info *s)
+{
+    uint8_t size = s->op1.size;
+    int bit_count = size * 8;
+    unsigned long long mask = (size >= 8) ? 0xFFFFFFFFFFFFFFFFULL : (1ULL << bit_count) - 1ULL;
+    unsigned long long count = s->op2_value % bit_count;
+
+    if (count == 0) return;
+
+    unsigned long long val = s->op1_value & mask;
+    unsigned long long result = ((val >> count) | (val << (bit_count - count))) & mask;
+    flags_update(s, result, count);
+    s->res_value = (long long)result;
+}
+
+/**
+ * @brief Executes rotate left through the carry flag on the destination operand by the count in op2.
+ * 
+ * @param s Pointer to the Info structure holding all operand, instruction and results info
+ */
+static void exec_rcl(Info *s)
+{
+    uint8_t size = s->op1.size;
+    uint8_t bits = size * 8;
+    uint64_t count = s->op2_value % (bits + 1);
+    
+    uint64_t val = s->op1_value;
+    uint8_t cf = (read_rflags(s->registers) & 1U);
+
+    for (uint64_t i = 0; i < count; i++) {
+        uint8_t next_cf = (val >> (bits - 1)) & 1U;
+        val = (val << 1) | cf;
+        if (size < 8) {
+            val &= (1ULL << bits) - 1ULL;
+        }
+        cf = next_cf;
+    }
+
+    s->res_value = val;
+
+    // Update Carry Flag (bit 0)
+    uint32_t rflags = read_rflags(s->registers);
+    rflags = (rflags & ~1U) | (cf & 1U);
+    write_rflags(s->registers, rflags);
+}
+
+/**
+ * @brief Executes rotate right through the carry flag on the destination operand by the count in op2.
+ * 
+ * @param s Pointer to the Info structure holding all operand, instruction and results info
+ */
+static void exec_rcr(Info *s)
+{
+    uint8_t size = s->op1.size;
+    uint8_t bits = size * 8;
+    uint64_t count = s->op2_value % (bits + 1);
+
+    uint64_t val = s->op1_value;
+    uint8_t cf = (read_rflags(s->registers) & 1U);
+
+    for (uint64_t i = 0; i < count; i++) {
+        uint8_t next_cf = val & 1U;
+        val >>= 1;
+        if (cf) {
+            val |= (1ULL << (bits - 1));
+        }
+        cf = next_cf;
+    }
+
+    s->res_value = val;
+
+    // Update Carry Flag (bit 0)
+    uint32_t rflags = read_rflags(s->registers);
+    rflags = (rflags & ~1U) | (cf & 1U);
+    write_rflags(s->registers, rflags);
+}

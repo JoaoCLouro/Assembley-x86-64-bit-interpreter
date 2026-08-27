@@ -1,4 +1,3 @@
-import sys
 import re
 
 from . import patter_matching_helpers as PM
@@ -193,9 +192,9 @@ class Instruction_Parser:
         :rtype: None
         :raises SyntaxError: If the instruction tokens violate structural rules or expected operand counts at `self.rip`.
         """
-        if not self.validate_instruction_line(self.line):
+        if not self.validate_instruction_line(self.line): # type: ignore
             raise SyntaxError(f"Invalid instruction declaration syntax at line {self.rip}.")
-        self.parse_operands(self.line[1:])
+        self.parse_operands(self.line[1:]) # type: ignore
 
     def parse_operands(self, line: list[str]) -> None:
         """
@@ -524,7 +523,7 @@ class Instruction_Parser:
             return 32 if register.startswith('ymm') else 16
 
         if not Instruction_Parser.is_general_purpose_register(register):
-            location = f" AT LINE {rip}" if rip is not None else ""
+            location = f" AT LINE {rip}" if rip is not None else "" # type: ignore
             raise SyntaxError(f"INVALID SYNTAX FORMAT{location}!")
 
         if re.fullmatch(r'[abcd][hl]', register):

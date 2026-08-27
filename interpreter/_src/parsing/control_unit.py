@@ -231,6 +231,8 @@ class Control_Unit:
                 self.rip = ret if ret != None else self.rip
             except RuntimeError:
                 sys.exit(ExitCode.INVALID_INSTRUCTION_SYNTAX)
+            except ZeroDivisionError:
+                sys.exit(ExitCode.BY_0_DIVISION_ERROR)
 
 
 
@@ -248,6 +250,7 @@ class Control_Unit:
         :return: True if the instruction is present in the valid_instructions.json file
         :rtype: bool
         """
+        print(f"{instruction} at line {self.rip}")
 
         if instruction == "syscall":
             self.current_fu = "cpu"
@@ -418,9 +421,9 @@ class Control_Unit:
         """
         merged = {}
         for section in list:
-            if section != None:
-                merged.update(section)
-        return merged
+            if section != None: # type: ignore
+                merged.update(section) # type: ignore
+        return merged # type: ignore
 
 
     def _get_memory_section_state(self, section: DataSectionInfo | BssSectionInfo) -> dict[str, int]:
@@ -500,7 +503,7 @@ class Control_Unit:
                 size: int = info["size"]  # type: ignore
                 base_addr: int = info["addresses"][0]  # type: ignore
 
-                data: bytes = self.memory.read_bytes(base_addr, size)
+                data: bytes = self.memory.read_bytes(base_addr, size) # type: ignore
                 value: int = int.from_bytes(data, byteorder="little", signed=True)
 
                 results[i] = (name, value)

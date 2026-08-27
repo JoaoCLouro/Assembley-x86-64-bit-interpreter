@@ -133,7 +133,8 @@ void clean(Info *current_instruction_state);
  * * Calls the function associated to the instruction string.
  * 
  * @param current_state Pointer to the Info structure holding all operand, instruction and results info
+ * @return 0 if the exit was successful, 1 if caught any 0 division
  */ 
-void dispatch(Info *current_instruction_state);
+uint8_t dispatch(Info *current_instruction_state);
 
 #endif // OPERATIONS_H

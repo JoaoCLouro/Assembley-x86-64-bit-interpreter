@@ -246,6 +246,7 @@ The application returns the following exit codes to indicate success or specific
 | **12** | `INVALID_SYSCALL` | Unsuccessful exit due to an unsupported or malformed system call. |
 | **13** | `NO_EXIT_FOUND` | Unsuccessful exit due to reaching end-of-program without encountering an explicit exit syscall or termination instruction. |
 | **14** | `INVALID_OR_UNSUPPORTED_INSTRUCTION` | Unsuccessful exit due to an unrecognized or unimplemented instruction mnemonic. |
+| **15** | `BY_0_DIVISION_ERROR` | Unsuccessful exit due to a division by 0 error. |
 | **109101** | `SOFTWARE_ERROR` | Unsuccessful exit due to an internal software bug (ASCII representation of "me"). |
 
 ---

@@ -123,8 +123,7 @@ class Data_Path:
             raise RuntimeError(e) from e
         except NotImplementedError as e:
             print(e)
-            raise RuntimeError(e) from e
-        
+            raise RuntimeError(e) from e        
 
     # ----------------
     # Static helpers 
@@ -430,7 +429,7 @@ class Data_Path:
             raise RuntimeError(e) from e
         
         if op1_type == 1:   # REGISTER
-            val = int.from_bytes(val, "little") if isinstance(val, bytes) else val
+            val = int.from_bytes(val, "little") if isinstance(val, bytes) else val # type: ignore
             try:
                 self.registers.write_reg(op1.expression, val, True if op1.is_signed else False)
             except ValueError as e:

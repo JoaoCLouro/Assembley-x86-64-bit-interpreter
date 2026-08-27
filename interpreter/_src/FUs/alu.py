@@ -13,7 +13,6 @@ from conftest import SRC_ROOT
 
 # Lookup opcodes table
 ALU_OPCODES = {name.lower(): index for index, name in enumerate(INSTRUCTIONS['alu'])}
-
 class ALU:  
 
     __slots__ = ["lib", "state"]
@@ -53,7 +52,7 @@ class ALU:
         self.lib.clean.restype = None
 
         self.lib.dispatch.argtypes = [ctypes.POINTER(Info)]
-        self.lib.dispatch.restype = None
+        self.lib.dispatch.restype = ctypes.c_uint8
 
         # Prepares all needed info
         self.state = self.lib.create_operand_state()
@@ -106,8 +105,12 @@ class ALU:
     def execute(self) -> None:
         """
         Executes the instruction loaded in the c structure.
+        
+        :raises: ZeroDivisionError if the dispatcher catches any zero division error
         """
-        self.lib.dispatch(self.state)
+        if self.lib.dispatch(self.state) == 1:
+            raise ZeroDivisionError
+
 
 
     @staticmethod

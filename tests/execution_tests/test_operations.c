@@ -60,9 +60,10 @@ static void destroy_info(Info *info, CPURegs *regs, Table *table)
     free_table(table);
 }
 
-#define REG_A  0
-#define REG_B  1
-#define REG_C  2
+#define REG_A  0 // RAX
+#define REG_B  1 // RBX
+#define REG_C  2 // RCX
+#define REG_D  3 // RDX
 
 static void set64(CPURegs *r, uint8_t reg, uint64_t v) {
     write_reg(r, reg, (int64_t)v, 8, 0);
@@ -116,7 +117,6 @@ TEST(test_set_instruction_no_crash) {
 TEST(test_set_operand_info_no_crash) {
     Info *info = create_operand_state();
     ASSERT(info != NULL);
-    // Updated: matches set_operand_info signature with OpType enum and is_signed parameter
     set_operand_info(info, "op1", REG_A, 8, OP_REGISTER, 0, 0);
     free_operand_state(info);
 }
@@ -139,7 +139,7 @@ TEST(test_reuse_after_clean) {
 }
 
 // -----------------------------------------------------------------------
-// Tests — dispatch with ALU operations
+// Tests — basic ALU operations
 // -----------------------------------------------------------------------
 
 TEST(test_dispatch_add) {
@@ -377,6 +377,315 @@ TEST(test_dispatch_clean_between_instructions) {
 }
 
 // -----------------------------------------------------------------------
+// Tests — Multiplication (MUL, IMUL)
+// -----------------------------------------------------------------------
+
+TEST(test_dispatch_mul_64bit_no_overflow) {
+    CPURegs *regs; Table *table;
+    Info *info = make_info(&regs, &table);
+    ASSERT(info != NULL);
+
+    set64(regs, REG_A, 100);
+    set64(regs, REG_B, 50);
+
+    set_instruction(info, OP_MUL);
+    set_operand_info(info, "op1", REG_B, 8, OP_REGISTER, 0, 0);
+
+    dispatch(info);
+
+    ASSERT(get64(regs, REG_A) == 5000); // RAX = Lower product
+    ASSERT(get64(regs, REG_D) == 0);    // RDX = Upper product
+    ASSERT(read_carry_flag(regs) == 0);
+    ASSERT(read_overflow_flag(regs) == 0);
+
+    destroy_info(info, regs, table);
+}
+
+TEST(test_dispatch_mul_64bit_overflow_flags) {
+    CPURegs *regs; Table *table;
+    Info *info = make_info(&regs, &table);
+    ASSERT(info != NULL);
+
+    set64(regs, REG_A, 0x200000000ULL);
+    set64(regs, REG_B, 0x800000000ULL);
+
+    set_instruction(info, OP_MUL);
+    set_operand_info(info, "op1", REG_B, 8, OP_REGISTER, 0, 0);
+
+    dispatch(info);
+
+    ASSERT(get64(regs, REG_A) == 0);
+    ASSERT(get64(regs, REG_D) == 0x10ULL); // Fixed: 2^68 >> 64 = 16 (0x10)
+    ASSERT(read_carry_flag(regs) == 1);
+    ASSERT(read_overflow_flag(regs) == 1);
+
+    destroy_info(info, regs, table);
+}
+
+TEST(test_dispatch_imul_64bit_signed_negative) {
+    CPURegs *regs; Table *table;
+    Info *info = make_info(&regs, &table);
+    ASSERT(info != NULL);
+
+    set64(regs, REG_A, (uint64_t)-10LL);
+    set64(regs, REG_B, 5);
+
+    set_instruction(info, OP_IMUL);
+    set_operand_info(info, "op1", REG_B, 8, OP_REGISTER, 0, 1);
+
+    dispatch(info);
+
+    ASSERT((int64_t)get64(regs, REG_A) == -50LL);
+    ASSERT((int64_t)get64(regs, REG_D) == -1LL); // Sign-extended high 64 bits
+    ASSERT(read_carry_flag(regs) == 0);         // No overflow beyond sign extension
+    ASSERT(read_overflow_flag(regs) == 0);
+
+    destroy_info(info, regs, table);
+}
+
+TEST(test_dispatch_imul_64bit_overflow) {
+    CPURegs *regs; Table *table;
+    Info *info = make_info(&regs, &table);
+    ASSERT(info != NULL);
+
+    set64(regs, REG_A, 0x7FFFFFFFFFFFFFFFLL); // INT64_MAX
+    set64(regs, REG_B, 2);
+
+    set_instruction(info, OP_IMUL);
+    set_operand_info(info, "op1", REG_B, 8, OP_REGISTER, 0, 1);
+
+    dispatch(info);
+
+    ASSERT(read_carry_flag(regs) == 1);
+    ASSERT(read_overflow_flag(regs) == 1);
+
+    destroy_info(info, regs, table);
+}
+
+// -----------------------------------------------------------------------
+// Tests — Division (DIV, IDIV)
+// -----------------------------------------------------------------------
+
+TEST(test_dispatch_div_64bit) {
+    CPURegs *regs; Table *table;
+    Info *info = make_info(&regs, &table);
+    ASSERT(info != NULL);
+
+    set64(regs, REG_D, 0);   // Upper dividend
+    set64(regs, REG_A, 500); // Lower dividend
+    set64(regs, REG_B, 7);   // Divisor
+
+    set_instruction(info, OP_DIV);
+    set_operand_info(info, "op1", REG_B, 8, OP_REGISTER, 0, 0);
+
+    dispatch(info);
+
+    ASSERT(get64(regs, REG_A) == 71); // Quotient (500 / 7)
+    ASSERT(get64(regs, REG_D) == 3);  // Remainder (500 % 7)
+
+    destroy_info(info, regs, table);
+}
+
+TEST(test_dispatch_div_by_zero_guarded) {
+    CPURegs *regs; Table *table;
+    Info *info = make_info(&regs, &table);
+    ASSERT(info != NULL);
+
+    set64(regs, REG_D, 0);
+    set64(regs, REG_A, 100);
+    set64(regs, REG_B, 0); // Divisor = 0
+
+    set_instruction(info, OP_DIV);
+    set_operand_info(info, "op1", REG_B, 8, OP_REGISTER, 0, 0);
+
+    dispatch(info);
+
+    // State remains unmodified due to zero protection check
+    ASSERT(get64(regs, REG_A) == 100);
+    ASSERT(get64(regs, REG_D) == 0);
+
+    destroy_info(info, regs, table);
+}
+
+TEST(test_dispatch_idiv_signed) {
+    CPURegs *regs; Table *table;
+    Info *info = make_info(&regs, &table);
+    ASSERT(info != NULL);
+
+    set64(regs, REG_D, (uint64_t)-1LL); // Sign-extended high 64 bits for negative dividend
+    set64(regs, REG_A, (uint64_t)-50LL);
+    set64(regs, REG_B, 6);
+
+    set_instruction(info, OP_IDIV);
+    set_operand_info(info, "op1", REG_B, 8, OP_REGISTER, 0, 1);
+
+    dispatch(info);
+
+    ASSERT((int64_t)get64(regs, REG_A) == -8LL); // Quotient (-50 / 6)
+    ASSERT((int64_t)get64(regs, REG_D) == -2LL); // Remainder (-50 % 6)
+
+    destroy_info(info, regs, table);
+}
+
+// -----------------------------------------------------------------------
+// Tests — Bit Shifts (SHL/SAL, SHR, SAR)
+// -----------------------------------------------------------------------
+
+TEST(test_dispatch_shl) {
+    CPURegs *regs; Table *table;
+    Info *info = make_info(&regs, &table);
+    ASSERT(info != NULL);
+
+    set64(regs, REG_A, 0x0F);
+    set64(regs, REG_B, 4);
+
+    set_instruction(info, OP_SHL);
+    set_operand_info(info, "op1", REG_A, 8, OP_REGISTER, 0, 0);
+    set_operand_info(info, "op2", REG_B, 8, OP_REGISTER, 0, 0);
+
+    dispatch(info);
+
+    ASSERT(get64(regs, REG_A) == 0xF0);
+    destroy_info(info, regs, table);
+}
+
+TEST(test_dispatch_sal_alias) {
+    CPURegs *regs; Table *table;
+    Info *info = make_info(&regs, &table);
+    ASSERT(info != NULL);
+
+    set64(regs, REG_A, 0x05);
+    set64(regs, REG_B, 3);
+
+    set_instruction(info, OP_SAL);
+    set_operand_info(info, "op1", REG_A, 8, OP_REGISTER, 0, 0);
+    set_operand_info(info, "op2", REG_B, 8, OP_REGISTER, 0, 0);
+
+    dispatch(info);
+
+    ASSERT(get64(regs, REG_A) == 40); // 5 << 3
+    destroy_info(info, regs, table);
+}
+
+TEST(test_dispatch_shr) {
+    CPURegs *regs; Table *table;
+    Info *info = make_info(&regs, &table);
+    ASSERT(info != NULL);
+
+    set64(regs, REG_A, 0xF0);
+    set64(regs, REG_B, 4);
+
+    set_instruction(info, OP_SHR);
+    set_operand_info(info, "op1", REG_A, 8, OP_REGISTER, 0, 0);
+    set_operand_info(info, "op2", REG_B, 8, OP_REGISTER, 0, 0);
+
+    dispatch(info);
+
+    ASSERT(get64(regs, REG_A) == 0x0F);
+    destroy_info(info, regs, table);
+}
+
+TEST(test_dispatch_sar_negative_preserves_sign) {
+    CPURegs *regs; Table *table;
+    Info *info = make_info(&regs, &table);
+    ASSERT(info != NULL);
+
+    set64(regs, REG_A, (uint64_t)-16LL);
+    set64(regs, REG_B, 2);
+
+    set_instruction(info, OP_SAR);
+    set_operand_info(info, "op1", REG_A, 8, OP_REGISTER, 0, 1);
+    set_operand_info(info, "op2", REG_B, 8, OP_REGISTER, 0, 0);
+
+    dispatch(info);
+
+    ASSERT((int64_t)get64(regs, REG_A) == -4LL);
+    destroy_info(info, regs, table);
+}
+
+// -----------------------------------------------------------------------
+// Tests — Rotations (ROL, ROR, RCL, RCR)
+// -----------------------------------------------------------------------
+
+TEST(test_dispatch_rol_64bit) {
+    CPURegs *regs; Table *table;
+    Info *info = make_info(&regs, &table);
+    ASSERT(info != NULL);
+
+    set64(regs, REG_A, 0x8000000000000001ULL);
+    set64(regs, REG_B, 1);
+
+    set_instruction(info, OP_ROL);
+    set_operand_info(info, "op1", REG_A, 8, OP_REGISTER, 0, 0);
+    set_operand_info(info, "op2", REG_B, 8, OP_REGISTER, 0, 0);
+
+    dispatch(info);
+
+    ASSERT(get64(regs, REG_A) == 0x0000000000000003ULL);
+    destroy_info(info, regs, table);
+}
+
+TEST(test_dispatch_ror_64bit) {
+    CPURegs *regs; Table *table;
+    Info *info = make_info(&regs, &table);
+    ASSERT(info != NULL);
+
+    set64(regs, REG_A, 0x0000000000000003ULL);
+    set64(regs, REG_B, 1);
+
+    set_instruction(info, OP_ROR);
+    set_operand_info(info, "op1", REG_A, 8, OP_REGISTER, 0, 0);
+    set_operand_info(info, "op2", REG_B, 8, OP_REGISTER, 0, 0);
+
+    dispatch(info);
+
+    ASSERT(get64(regs, REG_A) == 0x8000000000000001ULL);
+    destroy_info(info, regs, table);
+}
+
+TEST(test_dispatch_rcl_through_carry) {
+    CPURegs *regs; Table *table;
+    Info *info = make_info(&regs, &table);
+    ASSERT(info != NULL);
+
+    // Set Carry Flag = 1
+    write_rflags(regs, 1);
+
+    set64(regs, REG_A, 0x00ULL);
+    set64(regs, REG_B, 1);
+
+    set_instruction(info, OP_RCL);
+    set_operand_info(info, "op1", REG_A, 8, OP_REGISTER, 0, 0);
+    set_operand_info(info, "op2", REG_B, 8, OP_REGISTER, 0, 0);
+
+    dispatch(info);
+
+    ASSERT(get64(regs, REG_A) == 0x01ULL); // Rotated CF into bit 0
+    destroy_info(info, regs, table);
+}
+
+TEST(test_dispatch_rcr_through_carry) {
+    CPURegs *regs; Table *table;
+    Info *info = make_info(&regs, &table);
+    ASSERT(info != NULL);
+
+    // Set Carry Flag = 1
+    write_rflags(regs, 1);
+
+    set64(regs, REG_A, 0x00ULL);
+    set64(regs, REG_B, 1);
+
+    set_instruction(info, OP_RCR);
+    set_operand_info(info, "op1", REG_A, 8, OP_REGISTER, 0, 0);
+    set_operand_info(info, "op2", REG_B, 8, OP_REGISTER, 0, 0);
+
+    dispatch(info);
+
+    ASSERT(get64(regs, REG_A) == 0x8000000000000000ULL); // Rotated CF into MSB
+    destroy_info(info, regs, table);
+}
+
+// -----------------------------------------------------------------------
 // Entry point
 // -----------------------------------------------------------------------
 
@@ -384,6 +693,7 @@ int main(void)
 {
     printf("=== operand / dispatch tests ===\n\n");
 
+    // Lifecycle
     RUN(test_create_operand_state_not_null);
     RUN(test_free_operand_state_no_crash);
     RUN(test_set_registers_ref_no_crash);
@@ -393,6 +703,7 @@ int main(void)
     RUN(test_clean_no_crash);
     RUN(test_reuse_after_clean);
 
+    // ALU
     RUN(test_dispatch_add);
     RUN(test_dispatch_sub);
     RUN(test_dispatch_and);
@@ -406,6 +717,29 @@ int main(void)
     RUN(test_dispatch_add_sets_zero_flag);
     RUN(test_dispatch_sub_sets_zero_flag);
     RUN(test_dispatch_clean_between_instructions);
+
+    // Multiplication
+    RUN(test_dispatch_mul_64bit_no_overflow);
+    RUN(test_dispatch_mul_64bit_overflow_flags);
+    RUN(test_dispatch_imul_64bit_signed_negative);
+    RUN(test_dispatch_imul_64bit_overflow);
+
+    // Division
+    RUN(test_dispatch_div_64bit);
+    RUN(test_dispatch_div_by_zero_guarded);
+    RUN(test_dispatch_idiv_signed);
+
+    // Shifts
+    RUN(test_dispatch_shl);
+    RUN(test_dispatch_sal_alias);
+    RUN(test_dispatch_shr);
+    RUN(test_dispatch_sar_negative_preserves_sign);
+
+    // Rotations
+    RUN(test_dispatch_rol_64bit);
+    RUN(test_dispatch_ror_64bit);
+    RUN(test_dispatch_rcl_through_carry);
+    RUN(test_dispatch_rcr_through_carry);
 
     printf("\n%d / %d tests passed.\n", tests_passed, tests_run);
     return (tests_passed == tests_run) ? 0 : 1;
