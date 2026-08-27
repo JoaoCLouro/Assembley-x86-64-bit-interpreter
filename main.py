@@ -1,6 +1,5 @@
 import os
 import sys
-from interpreter import Interpreter
 from interpreter._src.parsing.segment_mapper import Segment_Mapper
 from interpreter._src.parsing.control_unit import Control_Unit
 from interpreter._src.helpers.storage import Storage
@@ -28,14 +27,10 @@ def main():
     else:
         argvcount: int = len(argv)
 
-    interpreter = Interpreter(file, argv)
-    interpreter.run()
-    """
     loader: Segment_Mapper = Segment_Mapper(file, argvcount, argv) 
     cpu: Control_Unit = Control_Unit(loader, is_debugging()) 
-    print("DEBUG")
-    cpu.run()                 
-    """
+    cpu.run()
+    print(f"Final State: \n {cpu.get_state("all")}")
 
 def get_file() -> str:
     """
