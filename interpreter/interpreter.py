@@ -1,5 +1,6 @@
 import os
 import sys
+import json
 
 from.exit_codes import ExitCode
 
@@ -19,7 +20,7 @@ class Interpreter_x86:
     """
 
 
-    __slots__ = ["state", "loader", "cpu", "memory", "register"]
+    __slots__ = ["state", "loader", "cpu", "memory", "register", "state_code"]
 
     def __init__ (self, file_name:str | None, args: list[str] | None, debugging:bool = False):
         """
@@ -56,7 +57,8 @@ class Interpreter_x86:
         Runs the interpreter and returns the appropriate exit code sent by the interpreter in case of a savable exit code.\n
         If the program fails at segment parsing returns an unrecoverable exit status
         """
-        return ExitCode.IRRECOVERABLE_ERROR if self.loader.exit_status != ExitCode.SUCCESS else self.cpu.run()
+        self.state_code =  ExitCode.IRRECOVERABLE_ERROR if self.loader.exit_status != ExitCode.SUCCESS else self.cpu.run()
+        return self.state_code
             
 
     def exit(self) -> dict[str, int]:
@@ -85,7 +87,7 @@ class Interpreter_x86:
     # State Fetching Methods
     # ------------------
 
-    def get_state(self, section) -> dict[str, int]:
+    def get_state(self, section: str) -> dict[str, int]:
         """
         Returns a snapshot of observable CPU/memory state as a dict of
         name -> current value, for the given named section.\n
@@ -103,6 +105,33 @@ class Interpreter_x86:
         :raises ValueError: If section is not one of the recognized names
         """
         return self.cpu.get_state(section) 
+
+    def to_json(self, path: str) -> str | None:
+        """
+        Exports the final state of the interpreter to a JSON file at the
+        exact destination path provided by the caller.\n
+        `path` is the full destination FILE path, not a directory. If a file already
+        exists at `path`, it is overwritten.\n
+        The parent directory of `path` must already exist; this method
+        does not create directories.
+
+        :param path: Full destination file path for the exported JSON (parent directory must already exist)
+        :type path: str
+        :return: The same `path` that was written to, or None if the export failed (interpreter did not exit successfully, or the parent directory doesn't exist)
+        :rtype: str | None
+        """
+        if self.state_code != ExitCode.SUCCESS:
+            print("Interpreter ended on an error! Export invalid")
+            return None
+
+        parent_dir = os.path.dirname(path)
+        if parent_dir and not os.path.isdir(parent_dir):
+            print(f"Invalid path provided! Parent directory does not exist: {parent_dir}")
+            return None
+
+        Interpreter_x86._export_state_to(path, self.get_state("all"))
+        return path
+
 
     # ------------------
     # Static Methods
@@ -150,3 +179,16 @@ class Interpreter_x86:
         user_input: str = input("Enter command-line arguments separated by spaces (or press Enter for none): ")
         args: list[str] = user_input.split() if user_input.strip() else []
         return args if args else None
+
+    @staticmethod
+    def _export_state_to(path: str, state: dict[str, int]) -> None:
+        """
+        Exports the contents of state to a json file in the `path` provided.
+
+        :param path: Path to store the exported file at
+        :type path: str
+        :param state: Contents to store
+        :type state: dict[str, int]
+        """
+        with open(path, "w") as file:
+            json.dump(state, file, indent=4)
