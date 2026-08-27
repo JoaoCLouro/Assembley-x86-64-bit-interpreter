@@ -63,7 +63,7 @@ MASKS_DIRECTIVES = {
 COMPONENTS_ADDRESSING_PATTERN = r'(0x[\da-fA-F]+|[a-zA-Z_][a-zA-Z0-9_]*|\d+)'
 GENERAL_PURPOSE_REGISTERS_PATTERN = r'([er]?[abcd]x|[er]?[sb]p|[er]?[sd]i|[er]?ip|r[89][bdlw]?|r1[0-5][bdlw]?|[abcd][hl])'
 FPU_REGISTERS_PATTERN = r'(ymm[0-9]|xmm[0-9]|ymm1[0-5]|xmm1[0-5])'
-NUMBER_REPRESENTATION_PATTERN = r'(0x[\da-fA-F]+|\d[\da-fA-F]*h|0b[01]+|[01]+b|0d\d+|[-+]?\d+d|[0-7]+[oq]|[-+]?\d+)'
+NUMBER_REPRESENTATION_PATTERN = r'([-+]?(?:0[xX][\da-fA-F]+|\d[\da-fA-F]*[hH]|0[bB][01]+|[01]+[bB]|0[dD]\d+|\d+[dD]|[0-7]+[oOqQ]|\d+))'
 WORD_OR_CHARACTERS_PATTERN = r'(\".*?\"|\'.*?\')'
 IMMEDIATE_VALUE_PATTERN = fr'({NUMBER_REPRESENTATION_PATTERN}|{WORD_OR_CHARACTERS_PATTERN})'
 REGISTER_PATTERN = fr'({GENERAL_PURPOSE_REGISTERS_PATTERN}|{FPU_REGISTERS_PATTERN})'
@@ -104,10 +104,13 @@ TOKENS_PATTERN = r"""(?x)
     ".*?"|'.*?'|                  # Strings
     \[.*?\]|                      # Memory access
     \(.*?\)|                      # Parenthesized expressions
-    0x[\da-fA-F]+|                # Hex Prefix
-    \d+[\da-fA-F]*[hH]|           # Hex Suffix
-    [01]+[bB]|                    # Binary
-    0b[01]+|                      # Binary
+    [-+]?0[xX][\da-fA-F]+|        # Hex Prefix with sign
+    [-+]?\d+[\da-fA-F]*[hH]|      # Hex Suffix with sign
+    [-+]?0[bB][01]+|              # Binary prefix with sign
+    [-+]?[01]+[bB]|               # Binary suffix with sign
+    [-+]?0[dD]\d+|                # Decimal prefix with sign
+    [-+]?\d+[dD]|                 # Decimal suffix with sign (-100d)
+    [-+]?[0-7]+[oOqQ]|            # Octal with sign
     [a-zA-Z_]\w*:|                # Label/variable declarations 
     [a-zA-Z_]\w*|                 # Instructions / Registers / Labels (referenced, not declared)
     [-+]?\d+                      # Signed Decimals

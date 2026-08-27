@@ -235,7 +235,7 @@ class TestSegmentMapperParsingAndTokenization(unittest.TestCase):
         self.assertEqual(mapper.memory_list[0], ["label:", "mov", "rax", "0x1A4"])
         self.assertEqual(mapper.memory_list[1], ["db", "'string with spaces'", "0", "10b"])
         self.assertEqual(mapper.memory_list[2], [])
-        self.assertEqual(mapper.memory_list[3], ['valh:', 'dq', '7Ch', '0b', '1101', '-45', 'd'])
+        self.assertEqual(mapper.memory_list[3], ['valh:', 'dq', '7Ch', '0b1101', '-45d'])
 
 
 class TestSegmentMapperTextAndLabelDiscovery(unittest.TestCase):

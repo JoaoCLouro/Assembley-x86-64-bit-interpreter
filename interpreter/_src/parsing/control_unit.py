@@ -250,8 +250,6 @@ class Control_Unit:
         :return: True if the instruction is present in the valid_instructions.json file
         :rtype: bool
         """
-        print(f"{instruction} at line {self.rip}")
-
         if instruction == "syscall":
             self.current_fu = "cpu"
             return True

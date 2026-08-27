@@ -811,7 +811,7 @@ class TestParseTwoOperandInstruction:
         assert parser.op1.expression == "al"
         assert parser.op1.size == 1
         assert parser.op2.expression == "5"
-        assert parser.op2.size == 0
+        assert parser.op2.size == 1
 
 
 class TestParseValidationFailure:

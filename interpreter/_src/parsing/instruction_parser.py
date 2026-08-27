@@ -304,7 +304,10 @@ class Instruction_Parser:
             elif self.is_memory(expr):
                 self._solve_memory_operand_into(operand_obj, expr, size)
             elif self.is_number(expr):
-                operand_obj.set(expr, 2, self._parse_numeric_literal(expr), size)
+                val = self._parse_numeric_literal(expr)
+                is_signed = 1 if val < 0 else 0
+                raw_bits = val & 0xFFFFFFFFFFFFFFFF # Mask for C FFI bindings
+                operand_obj.set(expr, 2, raw_bits, size, is_signed=is_signed)
             elif self.is_label(expr):
                 resolved = self._solve_label_or_constant(expr)
                 operand_obj.set(expr, 2, resolved, size)
@@ -329,11 +332,11 @@ class Instruction_Parser:
         op1, op2 = self.op1, self.op2
 
         if op1.is_valid() and op2.is_valid():
-            # op1 is memory (type 0) with no size, op2 is a register
-            if op1.type == 0 and op1.size == 0 and op2.type == 1:
+            # op1 is memory (type 0) or immediate (type 2) with no size, op2 is a register
+            if op1.type in (0, 2) and op1.size == 0 and op2.type == 1:
                 op1.size = op2.size
-            # op2 is memory (type 0) with no size, op1 is a register
-            elif op2.type == 0 and op2.size == 0 and op1.type == 1:
+            # op2 is memory (type 0) or immediate (type 2) with no size, op1 is a register
+            elif op2.type in (0, 2) and op2.size == 0 and op1.type == 1:
                 op2.size = op1.size
 
     def _solve_register_operand(self, operand_obj: Operand, expr: str, size: int) -> None:
@@ -446,20 +449,21 @@ class Instruction_Parser:
         """
         Converts a numeric literal token into its integer value.
         """
-        if re.fullmatch(r'0[xX][\da-fA-F]+', literal):
+        if re.fullmatch(r'[-+]?0[xX][\da-fA-F]+', literal):
             return int(literal, 16)
-        if re.fullmatch(r'\d[\da-fA-F]*h', literal, re.IGNORECASE):
-            return int(literal[:-1], 16)
-        if re.fullmatch(r'0[bB][01]+', literal):
+        if re.fullmatch(r'[-+]?\d[\da-fA-F]*h', literal, re.IGNORECASE):
+            return int(literal.rstrip('hH'), 16)
+        if re.fullmatch(r'[-+]?0[bB][01]+', literal):
             return int(literal, 2)
-        if re.fullmatch(r'[01]+b', literal, re.IGNORECASE):
-            return int(literal[:-1], 2)
-        if re.fullmatch(r'0[dD]\d+', literal):
-            return int(literal[2:], 10)
+        if re.fullmatch(r'[-+]?[01]+b', literal, re.IGNORECASE):
+            return int(literal.rstrip('bB'), 2)
+        if re.fullmatch(r'[-+]?0[dD]\d+', literal):
+            sign = -1 if literal.startswith('-') else 1
+            return sign * int(literal.lstrip('+-')[2:], 10)
         if re.fullmatch(r'[-+]?\d+d', literal, re.IGNORECASE):
-            return int(literal[:-1], 10)
-        if re.fullmatch(r'[0-7]+[oq]', literal, re.IGNORECASE):
-            return int(literal[:-1], 8)
+            return int(literal.rstrip('dD'), 10)
+        if re.fullmatch(r'[-+]?[0-7]+[oq]', literal, re.IGNORECASE):
+            return int(literal.rstrip('oqOQ'), 8)
         if re.fullmatch(r'[-+]?\d+', literal):
             return int(literal)
         raise ValueError(f"Program parsing ran into a problem! Unrecognized numeric literal: '{literal}'")
