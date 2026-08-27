@@ -233,6 +233,8 @@ class Control_Unit:
                 sys.exit(ExitCode.INVALID_INSTRUCTION_SYNTAX)
             except ZeroDivisionError:
                 sys.exit(ExitCode.BY_0_DIVISION_ERROR)
+            except NameError:
+                sys.exit(ExitCode.INVALID_OR_UNSUPPORTED_INSTRUCTION)
 
 
 

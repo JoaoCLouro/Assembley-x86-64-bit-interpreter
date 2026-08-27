@@ -108,8 +108,12 @@ class ALU:
         
         :raises: ZeroDivisionError if the dispatcher catches any zero division error
         """
-        if self.lib.dispatch(self.state) == 1:
+        exit_code = self.lib.dispatch(self.state)
+        if exit_code == 1:
             raise ZeroDivisionError
+        elif exit_code == 2:
+            raise NameError
+        
 
 
 

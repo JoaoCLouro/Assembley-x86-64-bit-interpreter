@@ -215,7 +215,7 @@ uint8_t dispatch(Info *s)
     {
         printf("Error: invalid or unimplemented opcode (%d)\n", (int)op);
         clean(s);
-        return;
+        return 2;
     }
     
     set_result_info(s);
