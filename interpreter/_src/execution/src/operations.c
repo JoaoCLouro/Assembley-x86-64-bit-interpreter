@@ -73,7 +73,20 @@ const InstructionHandler dispatch_table[OP_COUNT] = {
     [OP_XOR]  = exec_xor,
     [OP_NOT]  = exec_not,
     [OP_NEG]  = exec_neg,
-    [OP_XCHG] = exec_xchg
+    [OP_XCHG] = exec_xchg,
+    [OP_MUL]  = exec_mult,
+    [OP_IMUL] = exec_imult,
+    [OP_DIV]  = exec_div,
+    [OP_IDIV] = exec_idiv,
+    [OP_SHL]  = exec_shl,
+    [OP_SAL]  = exec_sal,
+    [OP_SHR]  = exec_shr,
+    [OP_SAR]  = exec_sar,
+    [OP_ROL]  = exec_rol,
+    [OP_RCL]  = exec_rcl,
+    [OP_ROR]  = exec_ror,
+    [OP_RCR]  = exec_rcr
+
     // FPU
 };
 
@@ -557,3 +570,27 @@ static void exec_xchg(Info *s)
     commit_operand(s, &s->op1, val2);
     commit_operand(s, &s->op2, val1);
 }
+
+static void exec_mult(Info *s){}
+
+static void exec_imult(Info *s) {}
+
+static void exec_div(Info *s) {}
+
+static void exec_idiv(Info *s) {}
+
+static void exec_shl(Info *s) {}
+
+static void exec_sal(Info * s) {}
+
+static void exec_shr(Info *s) {}
+
+static void exec_sar(Info * s) {}
+
+static void exec_rol(Info *s) {}
+
+static void exec_rcl(Info * s) {}
+
+static void exec_ror(Info *s) {}
+
+static void exec_rcr(Info * s) {}

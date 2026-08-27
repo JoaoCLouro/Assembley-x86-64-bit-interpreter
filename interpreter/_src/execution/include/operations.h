@@ -42,6 +42,18 @@ typedef enum {
     OP_NOT,
     OP_NEG,
     OP_XCHG,
+    OP_MUL,
+    OP_IMUL,
+    OP_DIV,
+    OP_IDIV,
+    OP_SHL,
+    OP_SAL,
+    OP_SHR,
+    OP_SAR,
+    OP_ROL,
+    OP_ROR,
+    OP_RCL,
+    OP_RCR,
     
     // FPU
     // TO IMPLEMENT LATER

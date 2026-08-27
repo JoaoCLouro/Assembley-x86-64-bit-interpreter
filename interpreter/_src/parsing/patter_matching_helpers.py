@@ -36,7 +36,10 @@ INSTRUCTIONS: dict[str, dict[str, int]] = {
                 },
                 'alu': {
                     'cmp': 2, 'add': 2, 'adc': 2, 'sub': 2, 'sbb': 2, 'inc': 1,
-                    'dec': 1, 'and': 2, 'or': 2, 'xor': 2, 'not': 1, 'neg': 1, 'xchg': 2
+                    'dec': 1, 'and': 2, 'or': 2, 'xor': 2, 'not': 1, 'neg': 1, 'xchg': 2,
+                    'mul': 1, 'imul': 1, 'div': 1, 'idiv': 1,
+                    'shl': 2, 'sal': 2, 'shr': 2, 'sar': 2,
+                    'rol': 2, 'ror': 2, 'rcl': 2, 'rcr': 2
                 }, 
                 'fpu': {}
             }
