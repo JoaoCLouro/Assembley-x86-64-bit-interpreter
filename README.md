@@ -28,10 +28,10 @@ Before using please make sure your code follows the [Code format references](#co
 
 ### 1. From GitHub Releases (Pre-built Package)
 
-Download and install the pre-compiled wheel directly from the [v0.3.0 GitHub Release](https://github.com/JoaoCLouro/Assembley-x86-64-bit-interpreter/releases/tag/v0.3.0):
+Download and install the pre-compiled wheel directly from the [v0.3.1 GitHub Release](https://github.com/JoaoCLouro/Assembley-x86-64-bit-interpreter/releases/tag/v0.3.0):
 
 ```bash
-pip install https://github.com/JoaoCLouro/Assembley-x86-64-bit-interpreter/releases/download/v0.3.0/cpu_simulator-0.3.0-py3-none-any.whl
+pip install https://github.com/JoaoCLouro/Assembley-x86-64-bit-interpreter/releases/download/v0.3.1/cpu_simulator-0.3.1-py3-none-any.whl
 ```
 
 ### 2. From Source
@@ -47,7 +47,7 @@ make
 # Build local distribution wheels
 python -m pip install pyproject-build
 pyproject-build
-pip install dist/cpu_simulator-0.3.0-py3-none-any.whl
+pip install dist/cpu_simulator-0.3.1-py3-none-any.whl
 ```
 
 
