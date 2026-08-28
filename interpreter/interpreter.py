@@ -61,27 +61,35 @@ class Interpreter_x86:
         return self.state_code
             
 
-    def exit(self) -> dict[str, int | str]:
+    def exit(self) -> dict[str, int | str] | None:
         """
-        Clears all space used by the interpreter's execution components saving its state in an accessible variable.
+        Clears all space used by the interpreter's execution components saving its state in an accessible variable 
+        or returning None if the exit code was an irrecoverable error.\n
         After calling this method you can access 'self.state' and get the full information of the process when it finished
         This method also returns this same state if needed
 
-        :return: The state of the process when it finished
-        :rtype: dict[str, int]
+        :return: The state of the process when it finished or None if the an irrecoverable error ended the interpreter
+        :rtype: dict[str, int] | None
         """
+        if self.state_code == ExitCode.IRRECOVERABLE_ERROR:
+            self._clear_state()
+            print("Interpreter ended on an irrecoverable error! Export invalid")
+            return None
         # Safe because its ensured the string 'all' is supported
         self.state = self.get_state("all")
+        self._clear_state()
+        return self.state
 
+    def _clear_state(self) -> None:
+        """
+        Clears attributes used in by the interpreter
+        """
         self.cpu = None # type: ignore
         self.loader = None # type: ignore
         if self.memory:
             self.memory.clean()
         if self.register:
             self.register.clean()
-
-        return self.state
-
     
     # ------------------
     # State Fetching Methods
@@ -127,8 +135,8 @@ class Interpreter_x86:
         :return: The same `path` that was written to, or None if the export failed (interpreter did not exit successfully, or the parent directory doesn't exist)
         :rtype: str | None
         """
-        if self.state_code != ExitCode.SUCCESS:
-            print("Interpreter ended on an error! Export invalid")
+        if self.state_code == ExitCode.IRRECOVERABLE_ERROR:
+            print("Interpreter ended on an irrecoverable error! Export invalid")
             return None
 
         parent_dir = os.path.dirname(path)
