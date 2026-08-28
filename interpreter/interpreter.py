@@ -29,7 +29,7 @@ class Interpreter_x86:
         When finished you need to call clean() to free all the used memory!
         """
         # current process state
-        self.state: dict[str, int] = {}
+        self.state: dict[str, int | str] = {}
 
         if not file_name:
             file_name = Interpreter_x86._get_file()
@@ -61,7 +61,7 @@ class Interpreter_x86:
         return self.state_code
             
 
-    def exit(self) -> dict[str, int]:
+    def exit(self) -> dict[str, int | str]:
         """
         Clears all space used by the interpreter's execution components saving its state in an accessible variable.
         After calling this method you can access 'self.state' and get the full information of the process when it finished
@@ -87,7 +87,7 @@ class Interpreter_x86:
     # State Fetching Methods
     # ------------------
 
-    def get_state(self, section: str) -> dict[str, int]:
+    def get_state(self, section: str, numerical_representation: int = 16) -> dict[str, int | str]:
         """
         Returns a snapshot of observable CPU/memory state as a dict of
         name -> current value, for the given named section.\n
@@ -100,13 +100,18 @@ class Interpreter_x86:
             
         :param section: Which piece of state to fetch: 'all', 'data', 'rodata', 'bss', or 'registers'
         :type section: str
+        :param num_rep: Numerical Representation type to give state in (10 for decimal, 8 for octal, 16 for hexadecimal and 2 for binary)
+        :type num_rep: int
         :return: Mapping of variable/register name to its current signed value 
         :rtype: dict[str, int]
         :raises ValueError: If section is not one of the recognized names
         """
-        return self.cpu.get_state(section) 
+        if numerical_representation not in [2, 8, 10, 16]:
+                    print(f"{numerical_representation} not supported as a numerical representation type. Defaulting to 16")
+                    numerical_representation = 16
+        return self.cpu.get_state(section, numerical_representation) 
 
-    def to_json(self, path: str) -> str | None:
+    def to_json(self, path: str, numerical_representation: int =10) -> str | None:
         """
         Exports the final state of the interpreter to a JSON file at the
         exact destination path provided by the caller.\n
@@ -117,6 +122,8 @@ class Interpreter_x86:
 
         :param path: Full destination file path for the exported JSON (parent directory must already exist)
         :type path: str
+        :param num_rep: Numerical Representation type to export state in (10 for decimal, 8 for octal, 16 for hexadecimal and 2 for binary)
+        :type num_rep: int
         :return: The same `path` that was written to, or None if the export failed (interpreter did not exit successfully, or the parent directory doesn't exist)
         :rtype: str | None
         """
@@ -129,7 +136,11 @@ class Interpreter_x86:
             print(f"Invalid path provided! Parent directory does not exist: {parent_dir}")
             return None
 
-        Interpreter_x86._export_state_to(path, self.get_state("all"))
+        if numerical_representation not in [2, 8, 10, 16]:
+            print(f"{numerical_representation} not supported as a numerical representation type. Defaulting to 16")
+            numerical_representation = 16
+
+        Interpreter_x86._export_state_to(path, self.get_state("all", numerical_representation))
         return path
 
 
@@ -181,7 +192,7 @@ class Interpreter_x86:
         return args if args else None
 
     @staticmethod
-    def _export_state_to(path: str, state: dict[str, int]) -> None:
+    def _export_state_to(path: str, state: dict[str, int | str]) -> None:
         """
         Exports the contents of state to a json file in the `path` provided.
 

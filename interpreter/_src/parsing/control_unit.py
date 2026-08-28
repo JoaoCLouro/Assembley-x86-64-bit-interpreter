@@ -99,7 +99,7 @@ class Control_Unit:
                 return e.code # type: ignore
         return ExitCode.SUCCESS
 
-    def get_state(self, section: str) -> dict[str, int]:
+    def get_state(self, section: str, num_rep: int = 16) -> dict[str, int | str]:
             """
             Returns a snapshot of observable CPU/memory state as a dict of
             name -> current value, for the given named section.\n
@@ -112,26 +112,31 @@ class Control_Unit:
     
             :param section: Which piece of state to fetch: 'all', 'data', 'rodata', 'bss', or 'registers'
             :type section: str
-            :return: Mapping of variable/register name to its current signed value
-            :rtype: dict[str, int]
-            :raises ValueError: If section is not one of the recognized names
+            :param num_rep: Numerical Representation to give values in - 10 (decimal, default), 2 (binary), 8 (octal), or 16 (hexadecimal). Non-decimal bases return Python-style prefixed strings (e.g. "0x2a"); negative values are shown as their two's-complement bit pattern at the value's actual width, not a signed "-0x.." string.
+            :type num_rep: int
+            :return: Mapping of variable/register name to its current value - a plain int for decimal, or a base-prefixed string for binary/octal/hexadecimal
+            :rtype: dict[str, int | str]
+            :raises ValueError: If section is not one of the recognized names, or num_rep is not one of 2, 8, 10, 16
             """
+            if num_rep not in (2, 8, 10, 16):
+                raise ValueError(f"UNSUPPORTED NUMERICAL REPRESENTATION '{num_rep}'. Expected one of: 2, 8, 10, 16.")
+
             if section == "all":
-                data = self._get_memory_section_state(self.data_section)
-                rodata = self._get_memory_section_state(self.rodata_section)
-                bss = self._get_memory_section_state(self.bss_section)
-                registers = self._get_registers_state()
-                return Control_Unit._merge_list([rodata, data, bss, registers])
+                data = self._get_memory_section_state(self.data_section, num_rep)
+                rodata = self._get_memory_section_state(self.rodata_section, num_rep)
+                bss = self._get_memory_section_state(self.bss_section, num_rep)
+                registers = self._get_registers_state(num_rep)
+                return Control_Unit._merge_list([rodata, data, bss, registers]) # type: ignore
             
 
             elif section == "data":
-                return self._get_memory_section_state(self.data_section)
+                return self._get_memory_section_state(self.data_section, num_rep)
             elif section == "rodata":
-                return self._get_memory_section_state(self.rodata_section)
+                return self._get_memory_section_state(self.rodata_section, num_rep)
             elif section == "bss":
-                return self._get_memory_section_state(self.bss_section)
+                return self._get_memory_section_state(self.bss_section, num_rep)
             elif section == "registers":
-                return self._get_registers_state()
+                return self._get_registers_state(num_rep)
             else:
                 raise ValueError(f"UNKNOWN SECTION '{section}' REQUESTED FOR get_state.")
     
@@ -401,7 +406,7 @@ class Control_Unit:
             print("(empty section)")
             return
 
-        for name, value in self._fetch_section_values(section, var_names):
+        for name, value in self._fetch_section_values(section, var_names): # type: ignore
             print(f"{name}: {value}")
 
     # ----------------------------------------
@@ -426,13 +431,55 @@ class Control_Unit:
         return merged # type: ignore
 
 
-    def _get_memory_section_state(self, section: DataSectionInfo | BssSectionInfo) -> dict[str, int]:
+    @staticmethod
+    def _format_value(value: int, size_bytes: int, num_rep: int) -> int | str:
+        """
+        Formats a signed integer value into the requested numeric
+        representation.\n
+        Decimal (10) returns the value unchanged, as a plain Python int.
+        Every other base (2, 8, 16) returns a string with the
+        corresponding Python-style prefix ("0b", "0o", "0x"). Negative
+        values are converted to their two's-complement bit pattern at
+        the value's actual bit width (size_bytes * 8) before formatting,
+        matching how the value is genuinely stored in memory/a register,
+        rather than showing a signed "-0x.." string.
+
+        :param value: The signed value to format (as returned by read_reg / a memory read)
+        :type value: int
+        :param size_bytes: The value's width in bytes (e.g. 8 for a 64-bit register), used to compute its two's-complement pattern when negative
+        :type size_bytes: int
+        :param num_rep: Target base - 10 (decimal), 2 (binary), 8 (octal), or 16 (hexadecimal)
+        :type num_rep: int
+        :return: The value unchanged (decimal) or a base-prefixed string (binary/octal/hex)
+        :rtype: int | str
+        :raises ValueError: If num_rep is not one of 2, 8, 10, 16
+        """
+        if num_rep == 10:
+            return value
+
+        # Two's-complement pattern at the value's real bit width, so a
+        # negative value's non-decimal representation matches what's
+        # actually stored, e.g. -100 (int8) -> 0x9c, not -0x64.
+        unsigned_value = value & ((1 << (size_bytes * 8)) - 1) if value < 0 else value
+
+        if num_rep == 16:
+            return f"0x{unsigned_value:x}"
+        elif num_rep == 8:
+            return f"0o{unsigned_value:o}"
+        elif num_rep == 2:
+            return f"0b{unsigned_value:b}"
+        else:
+            raise ValueError(f"UNSUPPORTED NUMERICAL REPRESENTATION '{num_rep}'. Expected one of: 2, 8, 10, 16.")
+
+    def _get_memory_section_state(self, section: DataSectionInfo | BssSectionInfo, num_rep: int) -> dict[str, int | str]:
         """
         Threaded-fetch counterpart to print_section, returning the section's
         variable values as a dict instead of printing them.
 
         :param section: The program section to read (data_section, rodata_section, or bss_section)
         :type section: DataSectionInfo | BssSectionInfo
+        :param num_rep: Numerical Representation type to give values in (10 for decimal, 8 for octal, 16 for hexadecimal)
+        :type num_rep: int
         :return: Mapping of variable name to its current signed value
         :rtype: dict[str, int]
         """
@@ -441,9 +488,9 @@ class Control_Unit:
         if not var_names:
             return {}
 
-        return dict(self._fetch_section_values(section, var_names))
+        return dict(self._fetch_section_values(section, var_names, num_rep))
 
-    def _get_registers_state(self) -> dict[str, int]:
+    def _get_registers_state(self, num_rep: int) -> dict[str, int | str]:
         """
         Returns every general-purpose register's current value plus the
         individual status flags, as a single flat dict.\n
@@ -451,23 +498,25 @@ class Control_Unit:
         already applies each register's current signed/unsigned
         interpretation (2's complement correction).
 
+        :param num_rep: Numerical Representation type to give values in (10 for decimal, 8 for octal, 16 for hexadecimal)
+        :type num_rep: int
         :return: Mapping of register/flag name to its current value
         :rtype: dict[str, int]
         """
-        state: dict[str, int] = {}
+        state: dict[str, int | str] = {}
         for reg_name in Registers_Interface.REGISTERS_MAP:
-            state[reg_name] = self.registers.read_reg(reg_name)
+            state[reg_name] = Control_Unit._format_value(self.registers.read_reg(reg_name), 8, num_rep)
 
-        state["ZF"] = int(self.registers.read_zero())
-        state["CF"] = int(self.registers.read_carry())
-        state["SF"] = int(self.registers.read_sign())
-        state["OF"] = int(self.registers.read_overflow())
-        state["PF"] = int(self.registers.read_parity())
-        state["TF"] = int(self.registers.read_trap_flag())
+        state["ZF"] = Control_Unit._format_value(int(self.registers.read_zero()), 1, num_rep)
+        state["CF"] = Control_Unit._format_value(int(self.registers.read_carry()), 1, num_rep)
+        state["SF"] = Control_Unit._format_value(int(self.registers.read_sign()), 1, num_rep)
+        state["OF"] = Control_Unit._format_value(int(self.registers.read_overflow()), 1, num_rep)
+        state["PF"] = Control_Unit._format_value(int(self.registers.read_parity()), 1, num_rep)
+        state["TF"] = Control_Unit._format_value(int(self.registers.read_trap_flag()), 1, num_rep)
 
         return state
 
-    def _fetch_section_values(self, section: DataSectionInfo | BssSectionInfo, var_names: list[str]) -> list[tuple[str, int]]:
+    def _fetch_section_values(self, section: DataSectionInfo | BssSectionInfo, var_names: list[str], num_rep: int) -> list[tuple[str, int | str]]:
         """
         Reads every variable in var_names from simulated memory concurrently
         across up to TOTAL_THREADS worker threads, each responsible for an
@@ -480,14 +529,16 @@ class Control_Unit:
         :type section: DataSectionInfo | BssSectionInfo
         :param var_names: Ordered list of variable names to fetch (section.keys())
         :type var_names: list[str]
-        :return: Ordered list of (name, signed_value) pairs, in var_names order
-        :rtype: list[tuple[str, int]]
+        :param num_rep: Numerical Representation type to give values in (2, 8, 10, or 16)
+        :type num_rep: int
+        :return: Ordered list of (name, formatted_value) pairs, in var_names order
+        :rtype: list[tuple[str, int | str]]
         """
         # One slot per variable, indexed by position in var_names. Each
         # thread only ever writes to its own disjoint slice, so no lock is
         # needed, and the final pass preserves the section's original
         # order regardless of which thread finishes first.
-        results: list[tuple[str, int] | None] = [None] * len(var_names)
+        results: list[tuple[str, int | str] | None] = [None] * len(var_names)
 
         # At least one thread always runs, even if TOTAL_THREADS resolved to 0
         thread_count: int = max(1, TOTAL_THREADS)
@@ -506,7 +557,7 @@ class Control_Unit:
                 data: bytes = self.memory.read_bytes(base_addr, size) # type: ignore
                 value: int = int.from_bytes(data, byteorder="little", signed=True)
 
-                results[i] = (name, value)
+                results[i] = (name, Control_Unit._format_value(value, size, num_rep))
 
         threads: list[threading.Thread] = []
         for t in range(thread_count):
