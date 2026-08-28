@@ -508,8 +508,8 @@ class TestPrintSection:
         control_unit._print_section(section)
 
         captured = capsys.readouterr()
-        assert "positive_var: 100" in captured.out
-        assert "negative_var: -50" in captured.out
+        assert "positive_var: 0x64" in captured.out
+        assert "negative_var: 0xffffffffffffffce" in captured.out
 
     def test_preserves_original_variable_order_in_output(self, control_unit, capsys):
         store = {}

@@ -406,7 +406,7 @@ class Control_Unit:
             print("(empty section)")
             return
 
-        for name, value in self._fetch_section_values(section, var_names): # type: ignore
+        for name, value in self._fetch_section_values(section, var_names, 16):
             print(f"{name}: {value}")
 
     # ----------------------------------------
